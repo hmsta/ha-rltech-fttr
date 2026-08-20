@@ -63,6 +63,14 @@ async def async_get_config_entry_diagnostics(
         summary = {
             "ap_count": len(data.aps),
             "ap_detail_count": len(data.ap_details),
+            "ap_missing_detail_count": sum(
+                1 for mac in data.aps if mac not in data.ap_details
+            ),
+            "ap_detail_missing_optical_count": sum(
+                1
+                for detail in data.ap_details.values()
+                if detail.optical_rx_power is None or detail.optical_tx_power is None
+            ),
             "online_ap_count": sum(1 for ap in data.aps.values() if ap.online),
             "station_count": len(data.stations),
             "lan_port_count": len(data.lan_ports),

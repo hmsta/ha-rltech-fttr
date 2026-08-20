@@ -647,6 +647,7 @@ class RltechClient:
         self.timeout = timeout
         self.token: str | None = None
         self._lock = asyncio.Lock()
+        self._ap_detail_cursor = 0
 
     async def login(self, session: Any) -> None:
         """Authenticate and retain the returned token."""
@@ -912,25 +913,28 @@ class RltechClient:
         if detail_interval <= 0:
             return []
         previous_details = previous.ap_details if previous is not None else {}
-        due: list[tuple[float, str, RltechAp]] = []
         polls_per_detail_interval = max(1, detail_interval // max(1, scan_interval))
         max_per_poll = max(
             1, (len(aps) + polls_per_detail_interval - 1) // polls_per_detail_interval
         )
-        poll_bucket = (int(now.timestamp()) // max(1, scan_interval)) % polls_per_detail_interval
         ordered_aps = sorted(
-            aps.values(),
+            (ap for ap in aps.values() if ap.sn),
             key=lambda ap: (
                 zlib.crc32((ap.sn or ap.mac).encode("utf-8")),
                 ap.sn or ap.mac,
             ),
         )
-        for index, ap in enumerate(ordered_aps):
-            if not ap.sn:
-                continue
-            ap_bucket = (index // max_per_poll) % polls_per_detail_interval
-            if ap_bucket != poll_bucket:
-                continue
+        missing = [
+            ap
+            for ap in ordered_aps
+            if previous_details.get(ap.mac) is None
+            or previous_details[ap.mac].last_update is None
+        ]
+        if missing:
+            return self._ap_detail_batch(missing, max_per_poll)
+
+        due: list[tuple[float, str, RltechAp]] = []
+        for ap in ordered_aps:
             detail = previous_details.get(ap.mac)
             if detail is not None and detail.last_update is not None:
                 age = (now - detail.last_update).total_seconds()
@@ -943,6 +947,16 @@ class RltechClient:
 
         due.sort(key=lambda item: (-item[0], item[1]))
         return [ap for _, _, ap in due[:max_per_poll]]
+
+    def _ap_detail_batch(self, aps: list[RltechAp], limit: int) -> list[RltechAp]:
+        """Return a rotating AP detail batch."""
+        if not aps or limit <= 0:
+            return []
+        start = self._ap_detail_cursor % len(aps)
+        count = min(limit, len(aps))
+        batch = [aps[(start + offset) % len(aps)] for offset in range(count)]
+        self._ap_detail_cursor = (start + count) % len(aps)
+        return batch
 
     async def _fetch_due_ap_details(
         self,
