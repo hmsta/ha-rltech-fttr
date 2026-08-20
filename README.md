@@ -26,9 +26,11 @@ This repository can be installed with HACS as a custom integration.
 7. Add the integration from **Settings > Devices & services**.
 
 HACS installs the integration files, including the bundled table card
-JavaScript. Home Assistant still requires Lovelace resources to be registered
-before custom cards can be used on a dashboard. Add these dashboard resources
-after the integration is installed:
+JavaScript. For the normal Home Assistant storage-mode dashboard setup, the
+integration registers the bundled card resources automatically when it starts.
+
+If your Home Assistant Lovelace resources are configured in YAML mode, add
+these dashboard resources manually after the integration is installed:
 
 ```text
 /rltech_fttr/rltech-fttr-station-table-card.js
