@@ -24,7 +24,8 @@ class RltechFttrStationTableCard extends HTMLElement {
     this._isMobile = false;
     this._mediaQuery = null;
     this._entryResolving = null;
-    this._preferencesLoaded = false;
+    this._resolvedEntryId = "";
+    this._preferencesLoadedKey = "";
   }
 
   setConfig(config) {
@@ -43,9 +44,7 @@ class RltechFttrStationTableCard extends HTMLElement {
     this._columns = this._validColumns(this._config.columns, this._defaultColumns());
     this._mobileColumns = this._validColumns(this._config.mobile_columns, this._defaultMobileColumns());
     this._setupMediaQuery();
-    if (this._config.entry_id) {
-      this._loadPreferences();
-    }
+    this._loadPreferences(true);
     this._renderShell();
     this._refreshTable();
   }
@@ -168,13 +167,34 @@ class RltechFttrStationTableCard extends HTMLElement {
     return `rltech_fttr.station_table.${key}`;
   }
 
-  _loadPreferences() {
-    if (this._preferencesLoaded || !this._config.remember_preferences) {
+  _legacyStorageKeys() {
+    if (this._config.storage_key || this._config.entry_id || !this._resolvedEntryId) {
+      return [];
+    }
+    return [`rltech_fttr.station_table.${this._resolvedEntryId}`];
+  }
+
+  _loadPreferences(force = false) {
+    const storageKey = this._storageKey();
+    if (
+      !this._config.remember_preferences ||
+      (!force && this._preferencesLoadedKey === storageKey)
+    ) {
       return;
     }
-    this._preferencesLoaded = true;
+    this._preferencesLoadedKey = storageKey;
     try {
-      const raw = window.localStorage.getItem(this._storageKey());
+      let raw = window.localStorage.getItem(storageKey);
+      let sourceKey = storageKey;
+      if (!raw) {
+        for (const key of this._legacyStorageKeys()) {
+          raw = window.localStorage.getItem(key);
+          if (raw) {
+            sourceKey = key;
+            break;
+          }
+        }
+      }
       if (!raw) {
         return;
       }
@@ -200,8 +220,11 @@ class RltechFttrStationTableCard extends HTMLElement {
       if (prefs.filters && typeof prefs.filters === "object") {
         this._filters = { ...this._filters, ...prefs.filters };
       }
+      if (sourceKey !== storageKey) {
+        this._savePreferences();
+      }
     } catch (_) {
-      window.localStorage.removeItem(this._storageKey());
+      window.localStorage.removeItem(storageKey);
     }
   }
 
@@ -209,22 +232,33 @@ class RltechFttrStationTableCard extends HTMLElement {
     if (!this._config.remember_preferences) {
       return;
     }
-    window.localStorage.setItem(
-      this._storageKey(),
-      JSON.stringify({
-        columns: this._columns,
-        mobile_columns: this._mobileColumns,
-        page_size: this._pageSize,
-        mobile_page_size: this._mobilePageSize,
-        sort_key: this._sortKey,
-        sort_dir: this._sortDir,
-        filters: this._filters,
-      })
-    );
+    try {
+      window.localStorage.setItem(
+        this._storageKey(),
+        JSON.stringify({
+          columns: this._columns,
+          mobile_columns: this._mobileColumns,
+          page_size: this._pageSize,
+          mobile_page_size: this._mobilePageSize,
+          sort_key: this._sortKey,
+          sort_dir: this._sortDir,
+          filters: this._filters,
+        })
+      );
+    } catch (_) {
+      // Browser storage can be unavailable in restricted web views.
+    }
   }
 
   _resetPreferences() {
-    window.localStorage.removeItem(this._storageKey());
+    try {
+      window.localStorage.removeItem(this._storageKey());
+      for (const key of this._legacyStorageKeys()) {
+        window.localStorage.removeItem(key);
+      }
+    } catch (_) {
+      // Browser storage can be unavailable in restricted web views.
+    }
     this._columns = this._validColumns(this._config.columns, this._defaultColumns());
     this._mobileColumns = this._validColumns(this._config.mobile_columns, this._defaultMobileColumns());
     this._pageSize = Number(this._config.page_size) || 25;
@@ -319,11 +353,11 @@ class RltechFttrStationTableCard extends HTMLElement {
       const result = await this._entryResolving;
       const entries = result.entries || [];
       if (entries.length === 1) {
-        this._config.entry_id = entries[0].entry_id;
-        this._loadPreferences();
+        this._resolvedEntryId = entries[0].entry_id;
+        this._loadPreferences(true);
         this._refreshColumnPicker();
         this._renderHeaders();
-        return this._config.entry_id;
+        return this._resolvedEntryId;
       }
       this._error = entries.length
         ? `Multiple RLTech FTTR integrations found. Set entry_id to one of: ${entries.map((entry) => `${entry.title} (${entry.entry_id})`).join(", ")}`

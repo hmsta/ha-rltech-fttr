@@ -31,6 +31,10 @@ from .websocket import async_setup_websocket
 _LOGGER = logging.getLogger(__name__)
 _STATIC_REGISTERED = False
 _CARD_RESOURCES = (STATION_CARD_URL, AP_CARD_URL)
+_CARD_RESOURCE_FILES = {
+    STATION_CARD_URL: STATION_CARD_FILENAME,
+    AP_CARD_URL: AP_CARD_FILENAME,
+}
 
 
 def _get_lovelace_data(hass: HomeAssistant):
@@ -58,6 +62,18 @@ def _lovelace_resource_mode(lovelace_data) -> str | None:
     return getattr(lovelace_data, "resource_mode", None)
 
 
+def _card_resource_version(url: str) -> str:
+    """Return a cache-busting version for a bundled card resource."""
+    filename = _CARD_RESOURCE_FILES[url]
+    path = Path(__file__).parent / "www" / filename
+    return str(int(path.stat().st_mtime))
+
+
+def _versioned_card_resource_url(url: str) -> str:
+    """Return card resource URL with a cache-busting query parameter."""
+    return f"{url}?v={_card_resource_version(url)}"
+
+
 async def _ensure_lovelace_card_resources(hass: HomeAssistant) -> None:
     """Register bundled custom cards with Lovelace storage resources."""
     lovelace_data = _get_lovelace_data(hass)
@@ -79,17 +95,26 @@ async def _ensure_lovelace_card_resources(hass: HomeAssistant) -> None:
         _LOGGER.exception("Unable to load Lovelace resources")
         return
 
-    existing_urls = {
-        str(item.get(CONF_URL, "")).split("?", 1)[0]
+    existing_by_base_url = {
+        str(item.get(CONF_URL, "")).split("?", 1)[0]: item
         for item in resources.async_items()
     }
     for url in _CARD_RESOURCES:
-        if url in existing_urls:
+        resource_url = _versioned_card_resource_url(url)
+        if existing := existing_by_base_url.get(url):
+            if existing.get(CONF_URL) != resource_url:
+                await resources.async_update_item(
+                    existing["id"],
+                    {CONF_RESOURCE_TYPE_WS: "module", CONF_URL: resource_url},
+                )
+                _LOGGER.info(
+                    "Updated RLTech FTTR Lovelace resource: %s", resource_url
+                )
             continue
         await resources.async_create_item(
-            {CONF_RESOURCE_TYPE_WS: "module", CONF_URL: url}
+            {CONF_RESOURCE_TYPE_WS: "module", CONF_URL: resource_url}
         )
-        _LOGGER.info("Registered RLTech FTTR Lovelace resource: %s", url)
+        _LOGGER.info("Registered RLTech FTTR Lovelace resource: %s", resource_url)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
