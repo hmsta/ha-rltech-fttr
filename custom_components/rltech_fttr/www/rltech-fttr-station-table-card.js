@@ -335,6 +335,7 @@ class RltechFttrStationTableCard extends HTMLElement {
       this._filterOptions = result.filter_options || {};
       this._error = "";
       this._refreshFilterOptions();
+      this._refreshPageSize();
     } catch (err) {
       this._error = err.message || String(err);
     }
