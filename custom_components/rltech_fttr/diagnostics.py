@@ -45,6 +45,16 @@ def _redact(value: Any) -> Any:
     return value
 
 
+def _ap_detail_missing_expected_optical(ap: Any, detail: Any | None) -> bool:
+    """Return whether an online PON AP detail is missing optical RX/TX values."""
+    if detail is None or ap.online is not True:
+        return False
+    uplink = detail.uplink if detail.uplink is not None else ap.uplink
+    if uplink != 2:
+        return False
+    return detail.optical_rx_power is None or detail.optical_tx_power is None
+
+
 async def async_get_config_entry_diagnostics(
     hass: "HomeAssistant", entry: "ConfigEntry"
 ) -> dict[str, Any]:
@@ -68,8 +78,8 @@ async def async_get_config_entry_diagnostics(
             ),
             "ap_detail_missing_optical_count": sum(
                 1
-                for detail in data.ap_details.values()
-                if detail.optical_rx_power is None or detail.optical_tx_power is None
+                for mac, ap in data.aps.items()
+                if _ap_detail_missing_expected_optical(ap, data.ap_details.get(mac))
             ),
             "online_ap_count": sum(1 for ap in data.aps.values() if ap.online),
             "station_count": len(data.stations),

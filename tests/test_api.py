@@ -661,6 +661,36 @@ def test_diagnostics_redaction_helper() -> None:
     assert result["nested"]["ok"] is True
 
 
+def test_diagnostics_missing_optical_only_counts_online_pon_aps() -> None:
+    diagnostics = load_module("diagnostics")
+    online_pon = models.RltechAp(mac="44:95:3B:B8:DC:D0", online=True, uplink=2)
+    online_lan = models.RltechAp(mac="44:95:3B:B8:DC:E0", online=True, uplink=0)
+    offline_pon = models.RltechAp(mac="44:95:3B:B8:DC:F0", online=False, uplink=2)
+    complete_pon = models.RltechAp(mac="44:95:3B:B8:DD:00", online=True, uplink=2)
+
+    assert diagnostics._ap_detail_missing_expected_optical(
+        online_pon,
+        models.RltechApDetail(mac=online_pon.mac, uplink=2),
+    )
+    assert not diagnostics._ap_detail_missing_expected_optical(
+        online_lan,
+        models.RltechApDetail(mac=online_lan.mac, uplink=0),
+    )
+    assert not diagnostics._ap_detail_missing_expected_optical(
+        offline_pon,
+        models.RltechApDetail(mac=offline_pon.mac, uplink=2),
+    )
+    assert not diagnostics._ap_detail_missing_expected_optical(
+        complete_pon,
+        models.RltechApDetail(
+            mac=complete_pon.mac,
+            uplink=2,
+            optical_rx_power=-15.34,
+            optical_tx_power=-1.79,
+        ),
+    )
+
+
 def test_authentication_error_mapping() -> None:
     async def run() -> None:
         client = api.RltechClient("http://olt", "u", "p")
