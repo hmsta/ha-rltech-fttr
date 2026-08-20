@@ -52,7 +52,6 @@
       "online_ap_count": { "name": "Online AP count" },
       "reported_station_count": { "name": "Reported station count" },
       "poll_duration": { "name": "Poll duration" },
-      "last_success": { "name": "Last successful poll" },
       "cpu_temperature": { "name": "CPU temperature" },
       "last_boot": { "name": "Last boot" },
       "wan_link_up_since": { "name": "WAN link up since" },

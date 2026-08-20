@@ -73,13 +73,6 @@ CONTROLLER_SENSORS = (
         entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=lambda data: data.poll_duration_ms,
     ),
-    RltechSensorDescription(
-        key="last_success",
-        translation_key="last_success",
-        device_class=SensorDeviceClass.TIMESTAMP,
-        entity_category=EntityCategory.DIAGNOSTIC,
-        value_fn=lambda data: data.last_success,
-    ),
 )
 
 
@@ -225,6 +218,27 @@ LANPON_PORT_SUFFIXES = {
 }
 
 
+SENSOR_NAMES = {
+    "ap_count": "AP count",
+    "online_ap_count": "Online AP count",
+    "reported_station_count": "Reported station count",
+    "poll_duration": "Poll duration",
+    "cpu_temperature": "CPU temperature",
+    "last_boot": "Last boot",
+    "wan_link_up_since": "WAN link up since",
+    "online": "Online",
+    "assoc_count": "Associated clients",
+    "profile": "Profile",
+    "alias": "Alias",
+    "optical_rx_power": "Optical RX power",
+    "optical_tx_power": "Optical TX power",
+    "downstream_optical_rx_power": "Downstream optical RX power",
+    "optical_temperature": "Optical temperature",
+    "optical_voltage": "Optical voltage",
+    "optical_current": "Optical current",
+}
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -313,6 +327,8 @@ class RltechControllerSensor(RltechEntity, SensorEntity):
         super().__init__(entry, coordinator)
         self.entity_description = description
         self._attr_unique_id = f"{entry.entry_id}_{description.key}"
+        self._attr_name = SENSOR_NAMES[description.key]
+        self._attr_suggested_object_id = f"rltech_fttr_{description.key}"
         self._attr_device_info = controller_device_info(entry)
 
     @property
@@ -336,6 +352,8 @@ class RltechOltStatusSensor(RltechEntity, SensorEntity):
         super().__init__(entry, coordinator)
         self.entity_description = description
         self._attr_unique_id = f"{entry.entry_id}_olt_{description.key}"
+        self._attr_name = SENSOR_NAMES[description.key]
+        self._attr_suggested_object_id = f"rltech_fttr_olt_{description.key}"
         self._attr_device_info = controller_device_info(entry)
 
     @property
@@ -370,6 +388,7 @@ class RltechApSensor(RltechEntity, SensorEntity):
         if unique_id is None:
             raise ValueError(f"AP {mac} has no SN")
         self._attr_unique_id = unique_id
+        self._attr_name = SENSOR_NAMES[description.key]
         hardware_id = ap.sn if ap else mac
         self._attr_suggested_object_id = f"{slugify(hardware_id)}_{description.key}"
 
@@ -423,6 +442,7 @@ class RltechApDetailSensor(RltechEntity, SensorEntity):
         if unique_id is None:
             raise ValueError(f"AP {mac} has no SN")
         self._attr_unique_id = unique_id
+        self._attr_name = SENSOR_NAMES[description.key]
         hardware_id = ap.sn if ap else mac
         self._attr_suggested_object_id = f"{slugify(hardware_id)}_{description.key}"
 
