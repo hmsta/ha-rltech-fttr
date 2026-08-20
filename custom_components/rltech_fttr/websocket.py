@@ -16,8 +16,36 @@ from .station_inventory import station_rows
 
 def async_setup_websocket(hass: HomeAssistant) -> None:
     """Register RLTech FTTR websocket commands."""
+    websocket_api.async_register_command(hass, websocket_get_entries)
     websocket_api.async_register_command(hass, websocket_get_stations)
     websocket_api.async_register_command(hass, websocket_get_access_points)
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "rltech_fttr/get_entries",
+    }
+)
+@websocket_api.async_response
+async def websocket_get_entries(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict,
+) -> None:
+    """Return loaded RLTech FTTR config entries for card auto-configuration."""
+    coordinators = hass.data.get(DOMAIN, {})
+    entries = []
+    for entry in hass.config_entries.async_entries(DOMAIN):
+        if entry.entry_id not in coordinators:
+            continue
+        entries.append(
+            {
+                "entry_id": entry.entry_id,
+                "title": entry.title,
+            }
+        )
+
+    connection.send_result(msg["id"], {"entries": entries})
 
 
 @websocket_api.websocket_command(

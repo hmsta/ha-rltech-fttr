@@ -125,7 +125,7 @@ AP_SENSORS = (
     ApSensorDescription(
         key="online",
         translation_key="ap_online",
-        icon="mdi:access-point-network",
+        icon="mdi:wifi-check",
         value_fn=lambda ap: "online" if ap.online else "offline" if ap.online is False else None,
     ),
     ApSensorDescription(
@@ -161,7 +161,7 @@ AP_DETAIL_SENSORS = (
     ApDetailSensorDescription(
         key="optical_rx_power",
         translation_key="ap_optical_rx_power",
-        icon="mdi:signal",
+        icon="mdi:download-network",
         native_unit_of_measurement="dBm",
         device_class=SensorDeviceClass.SIGNAL_STRENGTH,
         state_class=SensorStateClass.MEASUREMENT,
@@ -170,7 +170,7 @@ AP_DETAIL_SENSORS = (
     ApDetailSensorDescription(
         key="optical_tx_power",
         translation_key="ap_optical_tx_power",
-        icon="mdi:signal",
+        icon="mdi:upload-network",
         native_unit_of_measurement="dBm",
         device_class=SensorDeviceClass.SIGNAL_STRENGTH,
         state_class=SensorStateClass.MEASUREMENT,
@@ -266,7 +266,7 @@ LANPON_PORT_SENSORS = (
     LanPonPortSensorDescription(
         key="tx_power",
         translation_key="lanpon_port_tx_power",
-        icon="mdi:signal",
+        icon="mdi:upload-network",
         native_unit_of_measurement="dBm",
         device_class=SensorDeviceClass.SIGNAL_STRENGTH,
         state_class=SensorStateClass.MEASUREMENT,
@@ -276,7 +276,7 @@ LANPON_PORT_SENSORS = (
     LanPonPortSensorDescription(
         key="rx_power",
         translation_key="lanpon_port_rx_power",
-        icon="mdi:signal",
+        icon="mdi:download-network",
         native_unit_of_measurement="dBm",
         device_class=SensorDeviceClass.SIGNAL_STRENGTH,
         state_class=SensorStateClass.MEASUREMENT,
@@ -505,7 +505,9 @@ class RltechApSensor(RltechEntity, SensorEntity):
         self._attr_unique_id = unique_id
         self._attr_name = SENSOR_NAMES[description.key]
         hardware_id = ap.sn if ap else mac
-        self._attr_suggested_object_id = f"{slugify(hardware_id)}_{description.key}"
+        self._attr_suggested_object_id = (
+            f"rltech_ap_{slugify(hardware_id)}_{description.key}"
+        )
 
     @property
     def native_value(self) -> int | float | str | None:
@@ -559,7 +561,9 @@ class RltechApDetailSensor(RltechEntity, SensorEntity):
         self._attr_unique_id = unique_id
         self._attr_name = SENSOR_NAMES[description.key]
         hardware_id = ap.sn if ap else mac
-        self._attr_suggested_object_id = f"{slugify(hardware_id)}_{description.key}"
+        self._attr_suggested_object_id = (
+            f"rltech_ap_{slugify(hardware_id)}_{description.key}"
+        )
 
     @property
     def native_value(self) -> int | float | str | None:

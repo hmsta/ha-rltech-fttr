@@ -18,12 +18,11 @@ class RltechFttrApTableCard extends HTMLElement {
     this._shellRendered = false;
     this._isMobile = false;
     this._mediaQuery = null;
+    this._entryResolving = null;
+    this._preferencesLoaded = false;
   }
 
   setConfig(config) {
-    if (!config.entry_id) {
-      throw new Error("entry_id is required");
-    }
     this._config = {
       page_size: 25,
       page_size_options: [25, 50, 100],
@@ -37,7 +36,9 @@ class RltechFttrApTableCard extends HTMLElement {
     this._columns = this._validColumns(this._config.columns, this._defaultColumns());
     this._mobileColumns = this._validColumns(this._config.mobile_columns, this._defaultMobileColumns());
     this._setupMediaQuery();
-    this._loadPreferences();
+    if (this._config.entry_id) {
+      this._loadPreferences();
+    }
     this._renderShell();
     this._refreshTable();
   }
@@ -49,6 +50,12 @@ class RltechFttrApTableCard extends HTMLElement {
 
   getCardSize() {
     return 6;
+  }
+
+  static getStubConfig() {
+    return {
+      type: "custom:rltech-fttr-ap-table-card",
+    };
   }
 
   _columnDefs() {
@@ -147,14 +154,15 @@ class RltechFttrApTableCard extends HTMLElement {
   }
 
   _storageKey() {
-    const key = this._config.storage_key || this._config.entry_id;
+    const key = this._config.storage_key || this._config.entry_id || "auto";
     return `rltech_fttr.ap_table.${key}`;
   }
 
   _loadPreferences() {
-    if (!this._config.remember_preferences) {
+    if (this._preferencesLoaded || !this._config.remember_preferences) {
       return;
     }
+    this._preferencesLoaded = true;
     try {
       const raw = window.localStorage.getItem(this._storageKey());
       if (!raw) {
@@ -231,7 +239,7 @@ class RltechFttrApTableCard extends HTMLElement {
   }
 
   _scheduleFetch() {
-    if (!this._hass || !this._config.entry_id) {
+    if (!this._hass) {
       return;
     }
     const wait = Math.max(0, 5000 - (Date.now() - this._lastFetch));
@@ -245,14 +253,19 @@ class RltechFttrApTableCard extends HTMLElement {
   }
 
   async _fetch() {
-    if (!this._hass || !this._config.entry_id) {
+    if (!this._hass) {
       return;
     }
     this._lastFetch = Date.now();
     try {
+      const entryId = await this._entryId();
+      if (!entryId) {
+        this._refreshTable();
+        return;
+      }
       const result = await this._hass.callWS({
         type: "rltech_fttr/get_access_points",
-        entry_id: this._config.entry_id,
+        entry_id: entryId,
       });
       this._rows = result.access_points || [];
       this._error = "";
@@ -261,6 +274,34 @@ class RltechFttrApTableCard extends HTMLElement {
       this._error = err.message || String(err);
     }
     this._refreshTable();
+  }
+
+  async _entryId() {
+    if (this._config.entry_id) {
+      this._loadPreferences();
+      return this._config.entry_id;
+    }
+    if (!this._entryResolving) {
+      this._entryResolving = this._hass.callWS({ type: "rltech_fttr/get_entries" });
+    }
+    try {
+      const result = await this._entryResolving;
+      const entries = result.entries || [];
+      if (entries.length === 1) {
+        this._config.entry_id = entries[0].entry_id;
+        this._loadPreferences();
+        this._refreshColumnPicker();
+        this._renderHeaders();
+        return this._config.entry_id;
+      }
+      this._error = entries.length
+        ? `Multiple RLTech FTTR integrations found. Set entry_id to one of: ${entries.map((entry) => `${entry.title} (${entry.entry_id})`).join(", ")}`
+        : "No loaded RLTech FTTR integration found.";
+      return "";
+    } catch (err) {
+      this._error = err.message || String(err);
+      return "";
+    }
   }
 
   _filteredRows() {

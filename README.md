@@ -87,29 +87,6 @@ Add a station card:
 
 ```yaml
 type: custom:rltech-fttr-station-table-card
-entry_id: your_config_entry_id
-page_size: 25
-columns:
-  - mac
-  - ip
-  - hostname
-  - ssid
-  - ap_alias
-  - reported_online
-  - rssi
-  - band
-  - channel
-  - vlan
-  - uptime
-  - last_seen
-  - details
-mobile_columns:
-  - hostname
-  - ip
-  - ssid
-  - reported_online
-  - rssi
-  - details
 ```
 
 The card reads the latest coordinator data through the integration websocket
@@ -130,30 +107,6 @@ Add an AP inventory card:
 
 ```yaml
 type: custom:rltech-fttr-ap-table-card
-entry_id: your_config_entry_id
-page_size: 25
-columns:
-  - alias
-  - mac
-  - ip
-  - online
-  - model
-  - version
-  - profile
-  - assoc_count
-  - channel_24
-  - channel_5
-  - uplink_label
-  - sn
-  - details
-mobile_columns:
-  - alias
-  - ip
-  - online
-  - assoc_count
-  - channel_24
-  - channel_5
-  - details
 ```
 
 The AP card uses the same websocket pattern and supports search, sort, and
@@ -177,13 +130,23 @@ resource details, remain inventory-only table data.
 Both table cards accept:
 
 ```yaml
+entry_id: optional_config_entry_id
+page_size: 25
 page_size_options:
   - 25
   - 50
   - 100
 remember_preferences: true
 storage_key: optional_unique_key
+columns: []
+mobile_columns: []
 ```
+
+When exactly one RLTech FTTR integration is configured, `entry_id` can be
+omitted and the card will select it automatically. Set `entry_id` only when
+multiple RLTech FTTR integrations are configured. The visible columns, mobile
+columns, and page size have built-in defaults and can be changed from the
+card's table options menu.
 
 Use `storage_key` if you place multiple cards for the same config entry on
 different dashboards and want separate remembered browser layouts.
