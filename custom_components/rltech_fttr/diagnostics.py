@@ -52,7 +52,14 @@ async def async_get_config_entry_diagnostics(
     coordinator = hass.data.get(DOMAIN, {}).get(entry.entry_id)
     data = coordinator.data if coordinator is not None else None
     summary = None
+    dhcp_summary = None
     if data is not None:
+        try:
+            from .hostname_enrichment import dhcp_match_summary
+
+            dhcp_summary = dhcp_match_summary(hass, data.stations.values())
+        except Exception as err:  # pragma: no cover - defensive around HA internals
+            dhcp_summary = {"error": str(err)}
         summary = {
             "ap_count": len(data.aps),
             "ap_detail_count": len(data.ap_details),
@@ -110,5 +117,6 @@ async def async_get_config_entry_diagnostics(
                 "password": entry.data.get("password"),
             },
             "summary": summary,
+            "dhcp_hostname_enrichment": dhcp_summary,
         }
     )

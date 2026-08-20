@@ -28,6 +28,7 @@ api = load_module("api")
 identifiers = load_module("identifiers")
 ap_inventory = load_module("ap_inventory")
 dhcp_enrichment = load_module("dhcp_enrichment")
+hostname_enrichment = load_module("hostname_enrichment")
 station_inventory = load_module("station_inventory")
 
 
@@ -296,6 +297,46 @@ def test_dhcp_enrichment_does_not_replace_useful_fttr_hostname() -> None:
     )
 
     assert enriched.stations["7C:45:D0:4C:17:59"].hostname == "fttr-phone"
+
+
+def test_dhcp_match_summary_counts_fillable_missing_hostnames() -> None:
+    data = api.normalize_snapshot(
+        [payload([])],
+        [
+            payload(
+                [
+                    {
+                        "Mac": "0EF0A5FA19C9",
+                        "IP": "192.168.43.207",
+                        "HostName": "",
+                        "Status": "1",
+                    },
+                    {
+                        "Mac": "7C45D04C1760",
+                        "IP": "192.168.1.11",
+                        "HostName": "",
+                        "Status": "1",
+                    },
+                ]
+            )
+        ],
+        olt_html=None,
+    )
+
+    summary = hostname_enrichment.dhcp_match_summary(
+        object(),
+        data.stations.values(),
+        lookup_fn=lambda _hass: (
+            {"0ef0a5fa19c9": "Yaron-s-Tab-S7-FE"},
+            {"192.168.43.207": "Yaron-s-Tab-S7-FE"},
+        ),
+    )
+
+    assert summary["dhcp_mac_count"] == 1
+    assert summary["dhcp_ip_count"] == 1
+    assert summary["station_mac_match_count"] == 1
+    assert summary["station_ip_match_count"] == 1
+    assert summary["station_missing_hostname_fillable_count"] == 1
 
 
 def test_ap_inventory_rows_are_serialized_for_table() -> None:

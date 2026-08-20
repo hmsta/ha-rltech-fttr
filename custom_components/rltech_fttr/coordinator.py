@@ -5,7 +5,6 @@ from __future__ import annotations
 from datetime import timedelta
 import logging
 
-from homeassistant.components import dhcp
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
@@ -35,7 +34,7 @@ from .const import (
     DOMAIN,
     CONF_STATION_RETENTION,
 )
-from .dhcp_enrichment import clean_hostname, enrich_station_hostnames, normalize_lookup_mac
+from .hostname_enrichment import enrich_from_home_assistant_dhcp
 from .models import RltechData
 
 _LOGGER = logging.getLogger(__name__)
@@ -101,7 +100,10 @@ class RltechCoordinator(DataUpdateCoordinator[RltechData]):
             raise UpdateFailed("RLTech Web UI account is already in use") from err
         except Exception as err:
             raise UpdateFailed(f"Unable to fetch RLTech FTTR data: {err}") from err
-        data = enrich_station_hostnames(data, *_dhcp_hostname_lookup(self.hass))
+        try:
+            data = enrich_from_home_assistant_dhcp(self.hass, data)
+        except Exception as err:  # pragma: no cover - defensive around HA internals
+            _LOGGER.debug("Unable to enrich station hostnames from DHCP cache: %s", err)
         self._last_data = data
         return data
 
@@ -114,36 +116,3 @@ def build_client(entry: ConfigEntry) -> RltechClient:
         entry.data[CONF_PASSWORD],
     )
 
-
-def _dhcp_hostname_lookup(hass: HomeAssistant) -> tuple[dict[str, str], dict[str, str]]:
-    """Build DHCP hostname lookup maps once for a coordinator poll."""
-    by_mac: dict[str, str] = {}
-    by_ip: dict[str, str] = {}
-
-    try:
-        infos = dhcp.async_discovered_service_info(hass)
-    except Exception as err:  # pragma: no cover - defensive around HA internals
-        _LOGGER.debug("Unable to read Home Assistant DHCP discovery cache: %s", err)
-        return by_mac, by_ip
-
-    for info in infos:
-        hostname = clean_hostname(_info_value(info, "hostname"))
-        if hostname is None:
-            continue
-
-        mac = normalize_lookup_mac(_info_value(info, "macaddress"))
-        if mac:
-            by_mac[mac] = hostname
-
-        ip = _info_value(info, "ip")
-        if ip:
-            by_ip[str(ip)] = hostname
-
-    return by_mac, by_ip
-
-
-def _info_value(info, key: str):
-    """Return a DHCP discovery value from object or dict-like info."""
-    if isinstance(info, dict):
-        return info.get(key)
-    return getattr(info, key, None)
