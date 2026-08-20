@@ -24,7 +24,12 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import slugify
 
-from .const import CONF_AP_AREA_ID, DOMAIN
+from .const import (
+    CONF_AP_AREA_ID,
+    CONF_ENABLE_AP_DETAIL_POLLING,
+    DEFAULT_ENABLE_AP_DETAIL_POLLING,
+    DOMAIN,
+)
 from .coordinator import RltechCoordinator
 from .entity import RltechEntity, ap_device_info, controller_device_info
 from .identifiers import ap_sensor_unique_id
@@ -375,7 +380,6 @@ async def async_setup_entry(
     async_add_entities(entities)
 
     known_aps: set[str] = set()
-    known_ap_details: set[str] = set()
     known_lan_ports: set[int] = set()
     known_lanpon_ports: set[int] = set()
 
@@ -397,18 +401,14 @@ async def async_setup_entry(
                 RltechApSensor(entry, coordinator, mac, description)
                 for description in AP_SENSORS
             )
-        for mac, detail in coordinator.data.ap_details.items():
-            if mac in known_ap_details:
-                continue
-            ap = coordinator.data.aps.get(mac)
-            if not ap or not ap.sn:
-                _LOGGER.warning("Skipping AP %s detail sensors because the AP row has no SN", mac)
-                continue
-            known_ap_details.add(mac)
-            new_entities.extend(
-                RltechApDetailSensor(entry, coordinator, mac, description)
-                for description in AP_DETAIL_SENSORS
-            )
+            if entry.data.get(
+                CONF_ENABLE_AP_DETAIL_POLLING,
+                DEFAULT_ENABLE_AP_DETAIL_POLLING,
+            ):
+                new_entities.extend(
+                    RltechApDetailSensor(entry, coordinator, mac, description)
+                    for description in AP_DETAIL_SENSORS
+                )
         for port in coordinator.data.lan_ports:
             if port in known_lan_ports:
                 continue
@@ -522,6 +522,7 @@ class RltechOltStatusSensor(RltechEntity, SensorEntity):
 class RltechApSensor(RltechEntity, SensorEntity):
     """Managed AP sensor."""
 
+    _attr_has_entity_name = False
     entity_description: ApSensorDescription
 
     def __init__(
@@ -539,8 +540,8 @@ class RltechApSensor(RltechEntity, SensorEntity):
         if unique_id is None:
             raise ValueError(f"AP {mac} has no SN")
         self._attr_unique_id = unique_id
-        self._attr_name = SENSOR_NAMES[description.key]
         hardware_id = ap.sn if ap else mac
+        self._attr_name = f"RLTech AP {hardware_id} {SENSOR_NAMES[description.key]}"
         self._attr_suggested_object_id = (
             f"rltech_ap_{slugify(hardware_id)}_{description.key}"
         )
@@ -578,6 +579,7 @@ class RltechApSensor(RltechEntity, SensorEntity):
 class RltechApDetailSensor(RltechEntity, SensorEntity):
     """Slow managed AP detail sensor."""
 
+    _attr_has_entity_name = False
     entity_description: ApDetailSensorDescription
 
     def __init__(
@@ -595,8 +597,8 @@ class RltechApDetailSensor(RltechEntity, SensorEntity):
         if unique_id is None:
             raise ValueError(f"AP {mac} has no SN")
         self._attr_unique_id = unique_id
-        self._attr_name = SENSOR_NAMES[description.key]
         hardware_id = ap.sn if ap else mac
+        self._attr_name = f"RLTech AP {hardware_id} {SENSOR_NAMES[description.key]}"
         self._attr_suggested_object_id = (
             f"rltech_ap_{slugify(hardware_id)}_{description.key}"
         )

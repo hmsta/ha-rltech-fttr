@@ -70,8 +70,9 @@ management network or VPN.
 
 - One device for the OLT/controller with aggregate and optional health sensors.
 - One Home Assistant device per managed AP with an `SN`, with AP status,
-  associated-client-count, profile, alias, and optional optical diagnostic
-  sensors.
+  associated-client-count, profile, alias, and optional AP optical/detail
+  sensors. These detail sensors are created with the AP and remain unknown
+  until the slower AP optical detail poll has data for that AP.
 - Aggregate station sensors, including reported station count.
 - Optional LAN and LAN-PON diagnostic port sensors.
 
