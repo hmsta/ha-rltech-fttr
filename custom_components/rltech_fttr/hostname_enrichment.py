@@ -67,12 +67,12 @@ def dhcp_match_summary(
 
 def _dhcp_hostname_lookup(hass: HomeAssistant) -> tuple[dict[str, str], dict[str, str]]:
     """Build DHCP hostname lookup maps once for a coordinator poll."""
-    from homeassistant.components import dhcp
+    from homeassistant.components.dhcp.helpers import async_discovered_service_info
 
     by_mac: dict[str, str] = {}
     by_ip: dict[str, str] = {}
 
-    infos = dhcp.async_discovered_service_info(hass)
+    infos = async_discovered_service_info(hass)
 
     for info in infos:
         hostname = clean_hostname(_info_value(info, "hostname"))
