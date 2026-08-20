@@ -52,6 +52,13 @@ class RltechFttrApTableCard extends HTMLElement {
     return 6;
   }
 
+  getGridOptions() {
+    return {
+      columns: "full",
+      min_columns: 4,
+    };
+  }
+
   static getStubConfig() {
     return {
       type: "custom:rltech-fttr-ap-table-card",
