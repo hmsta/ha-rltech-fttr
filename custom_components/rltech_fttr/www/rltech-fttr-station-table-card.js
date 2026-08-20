@@ -435,7 +435,7 @@ class RltechFttrStationTableCard extends HTMLElement {
           flex: 0 1 132px;
           min-width: 92px;
         }
-        input, select, button {
+        input:not([type="checkbox"]), select, button {
           background: var(--card-background-color);
           border: 1px solid var(--divider-color);
           border-radius: 6px;
@@ -494,7 +494,15 @@ class RltechFttrStationTableCard extends HTMLElement {
           align-items: center;
           display: flex;
           font-size: 13px;
-          gap: 6px;
+          gap: 8px;
+          justify-content: flex-start;
+          line-height: 1.3;
+        }
+        .column-panel input[type="checkbox"] {
+          flex: 0 0 auto;
+          height: 16px;
+          margin: 0;
+          width: 16px;
         }
         .menu-button { width: 100%; }
         .table-wrap {
