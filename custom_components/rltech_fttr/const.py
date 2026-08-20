@@ -21,6 +21,7 @@ CONF_ENABLE_OLT_STATUS = "enable_olt_status"
 CONF_ENABLE_LAN_PORT_STATUS = "enable_lan_port_status"
 CONF_ENABLE_AP_DETAIL_POLLING = "enable_ap_detail_polling"
 CONF_AP_DETAIL_INTERVAL = "ap_detail_interval"
+CONF_AP_AREA_ID = "ap_area_id"
 
 DEFAULT_BASE_URL = "http://192.168.1.1:8080"
 DEFAULT_USERNAME = "useradmin"

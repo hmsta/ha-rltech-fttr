@@ -59,6 +59,8 @@ Add the integration from the Home Assistant UI. Required fields:
 - LAN port status polling, enabled by default
 - AP optical detail polling, enabled by default
 - AP optical detail interval, default `600` seconds
+- Area for AP devices, optional. When set, newly created AP devices are assigned
+  to this area if they do not already have an area.
 
 The OLT serves plain HTTP in the observed deployment. Use this only on a trusted
 management network or VPN.

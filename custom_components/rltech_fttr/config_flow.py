@@ -20,6 +20,7 @@ from .const import (
     CONF_ENABLE_OLT_STATUS,
     CONF_ENABLE_LAN_PORT_STATUS,
     CONF_AP_DETAIL_INTERVAL,
+    CONF_AP_AREA_ID,
     CONF_SCAN_INTERVAL,
     CONF_ENABLE_STATION_POLLING,
     DEFAULT_BASE_URL,
@@ -44,6 +45,12 @@ def _schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
     password_selector = selector.TextSelector(
         selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD)
     )
+    ap_area_key = vol.Optional(CONF_AP_AREA_ID)
+    if defaults.get(CONF_AP_AREA_ID):
+        ap_area_key = vol.Optional(
+            CONF_AP_AREA_ID,
+            default=defaults[CONF_AP_AREA_ID],
+        )
     schema: dict[Any, Any] = {
         vol.Required(
             CONF_BASE_URL, default=defaults.get(CONF_BASE_URL, DEFAULT_BASE_URL)
@@ -100,6 +107,7 @@ def _schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
                     CONF_AP_DETAIL_INTERVAL, DEFAULT_AP_DETAIL_INTERVAL
                 ),
             ): vol.All(vol.Coerce(int), vol.Range(min=MIN_AP_DETAIL_INTERVAL)),
+            ap_area_key: selector.AreaSelector(),
         }
     )
     return vol.Schema(schema)

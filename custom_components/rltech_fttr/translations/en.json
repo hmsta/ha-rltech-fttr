@@ -15,7 +15,8 @@
           "enable_olt_status": "Enable OLT status sensors",
           "enable_lan_port_status": "Enable LAN port status sensors",
           "enable_ap_detail_polling": "Enable AP optical detail polling",
-          "ap_detail_interval": "AP optical detail interval"
+          "ap_detail_interval": "AP optical detail interval",
+          "ap_area_id": "Area for AP devices"
         }
       },
       "reconfigure": {
@@ -31,7 +32,8 @@
           "enable_olt_status": "Enable OLT status sensors",
           "enable_lan_port_status": "Enable LAN port status sensors",
           "enable_ap_detail_polling": "Enable AP optical detail polling",
-          "ap_detail_interval": "AP optical detail interval"
+          "ap_detail_interval": "AP optical detail interval",
+          "ap_area_id": "Area for AP devices"
         }
       }
     },

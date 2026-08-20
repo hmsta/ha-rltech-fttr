@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
@@ -19,10 +20,11 @@ from homeassistant.const import (
     UnitOfTime,
 )
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import slugify
 
-from .const import DOMAIN
+from .const import CONF_AP_AREA_ID, DOMAIN
 from .coordinator import RltechCoordinator
 from .entity import RltechEntity, ap_device_info, controller_device_info
 from .identifiers import ap_sensor_unique_id
@@ -382,6 +384,7 @@ async def async_setup_entry(
         if coordinator.data is None:
             return
         new_entities = []
+        new_aps: list[RltechAp] = []
         for mac, ap in coordinator.data.aps.items():
             if mac in known_aps:
                 continue
@@ -389,6 +392,7 @@ async def async_setup_entry(
                 _LOGGER.warning("Skipping AP %s sensors because the AP row has no SN", mac)
                 continue
             known_aps.add(mac)
+            new_aps.append(ap)
             new_entities.extend(
                 RltechApSensor(entry, coordinator, mac, description)
                 for description in AP_SENSORS
@@ -423,9 +427,41 @@ async def async_setup_entry(
             )
         if new_entities:
             async_add_entities(new_entities)
+        if new_aps:
+            hass.async_create_task(_async_assign_area_to_ap_devices(hass, entry, new_aps))
 
     add_dynamic_entities()
     entry.async_on_unload(coordinator.async_add_listener(add_dynamic_entities))
+
+
+async def _async_assign_area_to_ap_devices(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    aps: list[RltechAp],
+) -> None:
+    """Assign newly created AP devices to the configured default AP area."""
+    area_id = entry.data.get(CONF_AP_AREA_ID)
+    if not area_id:
+        return
+
+    device_registry = dr.async_get(hass)
+    pending = {ap.sn for ap in aps if ap.sn}
+    for _ in range(5):
+        remaining = set()
+        for sn in pending:
+            device = device_registry.async_get_device(
+                identifiers={(DOMAIN, f"{entry.entry_id}_ap_{sn}")},
+            )
+            if device is None:
+                remaining.add(sn)
+                continue
+            if device.area_id is None:
+                device_registry.async_update_device(device.id, area_id=area_id)
+
+        if not remaining:
+            return
+        pending = remaining
+        await asyncio.sleep(0.2)
 
 
 class RltechControllerSensor(RltechEntity, SensorEntity):
