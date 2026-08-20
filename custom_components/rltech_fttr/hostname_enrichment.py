@@ -67,27 +67,52 @@ def dhcp_match_summary(
 
 def _dhcp_hostname_lookup(hass: HomeAssistant) -> tuple[dict[str, str], dict[str, str]]:
     """Build DHCP hostname lookup maps once for a coordinator poll."""
-    from homeassistant.components.dhcp.helpers import async_discovered_service_info
-
     by_mac: dict[str, str] = {}
     by_ip: dict[str, str] = {}
 
-    infos = async_discovered_service_info(hass)
-
-    for info in infos:
-        hostname = clean_hostname(_info_value(info, "hostname"))
+    for mac_address, data in _dhcp_address_data(hass).items():
+        hostname = clean_hostname(_info_value(data, "hostname"))
         if hostname is None:
             continue
 
-        mac = normalize_lookup_mac(_info_value(info, "macaddress"))
+        mac = normalize_lookup_mac(mac_address)
         if mac:
             by_mac[mac] = hostname
 
-        ip = _info_value(info, "ip")
+        ip = _info_value(data, "ip")
         if ip:
             by_ip[str(ip)] = hostname
 
     return by_mac, by_ip
+
+
+def _dhcp_address_data(hass: HomeAssistant) -> dict[str, dict[str, str]]:
+    """Return DHCP address data across Home Assistant helper API versions."""
+    try:
+        from homeassistant.components.dhcp.helpers import async_discovered_service_info
+    except ImportError:
+        async_discovered_service_info = None
+
+    if async_discovered_service_info is not None:
+        return {
+            str(_info_value(info, "macaddress") or ""): {
+                "hostname": str(_info_value(info, "hostname") or ""),
+                "ip": str(_info_value(info, "ip") or ""),
+            }
+            for info in async_discovered_service_info(hass)
+            if _info_value(info, "macaddress")
+        }
+
+    from homeassistant.components.dhcp.const import HOSTNAME, IP_ADDRESS
+    from homeassistant.components.dhcp.helpers import async_get_address_data_internal
+
+    return {
+        str(mac_address): {
+            "hostname": str(_info_value(data, HOSTNAME) or ""),
+            "ip": str(_info_value(data, IP_ADDRESS) or ""),
+        }
+        for mac_address, data in async_get_address_data_internal(hass).items()
+    }
 
 
 def _info_value(info, key: str):
