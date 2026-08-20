@@ -49,24 +49,28 @@ CONTROLLER_SENSORS = (
     RltechSensorDescription(
         key="ap_count",
         translation_key="ap_count",
+        icon="mdi:access-point-network",
         state_class=SensorStateClass.MEASUREMENT,
         value_fn=lambda data: len(data.aps),
     ),
     RltechSensorDescription(
         key="online_ap_count",
         translation_key="online_ap_count",
+        icon="mdi:wifi-check",
         state_class=SensorStateClass.MEASUREMENT,
         value_fn=lambda data: sum(1 for ap in data.aps.values() if ap.online),
     ),
     RltechSensorDescription(
         key="reported_station_count",
         translation_key="reported_station_count",
+        icon="mdi:wifi",
         state_class=SensorStateClass.MEASUREMENT,
         value_fn=lambda data: sum(1 for sta in data.stations.values() if sta.reported_online),
     ),
     RltechSensorDescription(
         key="poll_duration",
         translation_key="poll_duration",
+        icon="mdi:timer-outline",
         native_unit_of_measurement=UnitOfTime.MILLISECONDS,
         device_class=SensorDeviceClass.DURATION,
         state_class=SensorStateClass.MEASUREMENT,
@@ -84,9 +88,29 @@ class OltSensorDescription(SensorEntityDescription):
 
 
 OLT_SENSORS = (
-    OltSensorDescription(key="cpu_temperature", translation_key="cpu_temperature", native_unit_of_measurement="°C", device_class=SensorDeviceClass.TEMPERATURE, state_class=SensorStateClass.MEASUREMENT, entity_category=EntityCategory.DIAGNOSTIC, value_fn=lambda s: s.cpu_temperature),
-    OltSensorDescription(key="last_boot", translation_key="last_boot", device_class=SensorDeviceClass.TIMESTAMP, entity_category=EntityCategory.DIAGNOSTIC, value_fn=lambda s: s.last_boot),
-    OltSensorDescription(key="wan_link_up_since", translation_key="wan_link_up_since", device_class=SensorDeviceClass.TIMESTAMP, entity_category=EntityCategory.DIAGNOSTIC, value_fn=lambda s: s.wan_link_up_since),
+    OltSensorDescription(
+        key="cpu_temperature",
+        translation_key="cpu_temperature",
+        icon="mdi:thermometer",
+        native_unit_of_measurement="°C",
+        device_class=SensorDeviceClass.TEMPERATURE,
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda s: s.cpu_temperature,
+    ),
+    OltSensorDescription(
+        key="last_boot",
+        translation_key="last_boot",
+        icon="mdi:restart",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        value_fn=lambda s: s.last_boot,
+    ),
+    OltSensorDescription(
+        key="wan_link_up_since",
+        translation_key="wan_link_up_since",
+        icon="mdi:wan",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        value_fn=lambda s: s.wan_link_up_since,
+    ),
 )
 
 
@@ -98,10 +122,31 @@ class ApSensorDescription(SensorEntityDescription):
 
 
 AP_SENSORS = (
-    ApSensorDescription(key="online", translation_key="ap_online", value_fn=lambda ap: "online" if ap.online else "offline" if ap.online is False else None),
-    ApSensorDescription(key="assoc_count", translation_key="ap_assoc_count", state_class=SensorStateClass.MEASUREMENT, value_fn=lambda ap: ap.assoc_count),
-    ApSensorDescription(key="profile", translation_key="ap_profile", value_fn=lambda ap: ap.profile),
-    ApSensorDescription(key="alias", translation_key="ap_alias", value_fn=lambda ap: ap.alias),
+    ApSensorDescription(
+        key="online",
+        translation_key="ap_online",
+        icon="mdi:access-point-network",
+        value_fn=lambda ap: "online" if ap.online else "offline" if ap.online is False else None,
+    ),
+    ApSensorDescription(
+        key="assoc_count",
+        translation_key="ap_assoc_count",
+        icon="mdi:account-network",
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda ap: ap.assoc_count,
+    ),
+    ApSensorDescription(
+        key="profile",
+        translation_key="ap_profile",
+        icon="mdi:wifi-cog",
+        value_fn=lambda ap: ap.profile,
+    ),
+    ApSensorDescription(
+        key="alias",
+        translation_key="ap_alias",
+        icon="mdi:tag-outline",
+        value_fn=lambda ap: ap.alias,
+    ),
 )
 
 
@@ -116,24 +161,25 @@ AP_DETAIL_SENSORS = (
     ApDetailSensorDescription(
         key="optical_rx_power",
         translation_key="ap_optical_rx_power",
+        icon="mdi:signal",
         native_unit_of_measurement="dBm",
         device_class=SensorDeviceClass.SIGNAL_STRENGTH,
         state_class=SensorStateClass.MEASUREMENT,
-        entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=lambda detail: detail.optical_rx_power,
     ),
     ApDetailSensorDescription(
         key="optical_tx_power",
         translation_key="ap_optical_tx_power",
+        icon="mdi:signal",
         native_unit_of_measurement="dBm",
         device_class=SensorDeviceClass.SIGNAL_STRENGTH,
         state_class=SensorStateClass.MEASUREMENT,
-        entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=lambda detail: detail.optical_tx_power,
     ),
     ApDetailSensorDescription(
         key="downstream_optical_rx_power",
         translation_key="ap_downstream_optical_rx_power",
+        icon="mdi:download-network-outline",
         native_unit_of_measurement="dBm",
         device_class=SensorDeviceClass.SIGNAL_STRENGTH,
         state_class=SensorStateClass.MEASUREMENT,
@@ -143,15 +189,16 @@ AP_DETAIL_SENSORS = (
     ApDetailSensorDescription(
         key="optical_temperature",
         translation_key="ap_optical_temperature",
+        icon="mdi:thermometer",
         native_unit_of_measurement="°C",
         device_class=SensorDeviceClass.TEMPERATURE,
         state_class=SensorStateClass.MEASUREMENT,
-        entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=lambda detail: detail.optical_temperature,
     ),
     ApDetailSensorDescription(
         key="optical_voltage",
         translation_key="ap_optical_voltage",
+        icon="mdi:flash",
         native_unit_of_measurement="V",
         device_class=SensorDeviceClass.VOLTAGE,
         state_class=SensorStateClass.MEASUREMENT,
@@ -161,6 +208,7 @@ AP_DETAIL_SENSORS = (
     ApDetailSensorDescription(
         key="optical_current",
         translation_key="ap_optical_current",
+        icon="mdi:current-dc",
         native_unit_of_measurement="mA",
         device_class=SensorDeviceClass.CURRENT,
         state_class=SensorStateClass.MEASUREMENT,
@@ -178,9 +226,26 @@ class LanPortSensorDescription(SensorEntityDescription):
 
 
 LAN_PORT_SENSORS = (
-    LanPortSensorDescription(key="status", translation_key="lan_port_status", value_fn=lambda p: p.status),
-    LanPortSensorDescription(key="rate", translation_key="lan_port_rate", entity_category=EntityCategory.DIAGNOSTIC, value_fn=lambda p: p.rate),
-    LanPortSensorDescription(key="mode", translation_key="lan_port_mode", entity_category=EntityCategory.DIAGNOSTIC, value_fn=lambda p: p.mode),
+    LanPortSensorDescription(
+        key="status",
+        translation_key="lan_port_status",
+        icon="mdi:ethernet",
+        value_fn=lambda p: p.status,
+    ),
+    LanPortSensorDescription(
+        key="rate",
+        translation_key="lan_port_rate",
+        icon="mdi:speedometer",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda p: p.rate,
+    ),
+    LanPortSensorDescription(
+        key="mode",
+        translation_key="lan_port_mode",
+        icon="mdi:cog-outline",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda p: p.mode,
+    ),
 )
 
 
@@ -192,24 +257,74 @@ class LanPonPortSensorDescription(SensorEntityDescription):
 
 
 LANPON_PORT_SENSORS = (
-    LanPonPortSensorDescription(key="status", translation_key="lanpon_port_status", value_fn=lambda p: p.status),
-    LanPonPortSensorDescription(key="tx_power", translation_key="lanpon_port_tx_power", native_unit_of_measurement="dBm", device_class=SensorDeviceClass.SIGNAL_STRENGTH, state_class=SensorStateClass.MEASUREMENT, entity_category=EntityCategory.DIAGNOSTIC, value_fn=lambda p: p.tx_power),
-    LanPonPortSensorDescription(key="rx_power", translation_key="lanpon_port_rx_power", native_unit_of_measurement="dBm", device_class=SensorDeviceClass.SIGNAL_STRENGTH, state_class=SensorStateClass.MEASUREMENT, entity_category=EntityCategory.DIAGNOSTIC, value_fn=lambda p: p.rx_power),
-    LanPonPortSensorDescription(key="temperature", translation_key="lanpon_port_temperature", native_unit_of_measurement="°C", device_class=SensorDeviceClass.TEMPERATURE, state_class=SensorStateClass.MEASUREMENT, entity_category=EntityCategory.DIAGNOSTIC, value_fn=lambda p: p.temperature),
-    LanPonPortSensorDescription(key="voltage", translation_key="lanpon_port_voltage", native_unit_of_measurement="V", device_class=SensorDeviceClass.VOLTAGE, state_class=SensorStateClass.MEASUREMENT, entity_category=EntityCategory.DIAGNOSTIC, value_fn=lambda p: p.voltage),
-    LanPonPortSensorDescription(key="current", translation_key="lanpon_port_current", native_unit_of_measurement="mA", device_class=SensorDeviceClass.CURRENT, state_class=SensorStateClass.MEASUREMENT, entity_category=EntityCategory.DIAGNOSTIC, value_fn=lambda p: p.current),
+    LanPonPortSensorDescription(
+        key="status",
+        translation_key="lanpon_port_status",
+        icon="mdi:access-point-network",
+        value_fn=lambda p: p.status,
+    ),
+    LanPonPortSensorDescription(
+        key="tx_power",
+        translation_key="lanpon_port_tx_power",
+        icon="mdi:signal",
+        native_unit_of_measurement="dBm",
+        device_class=SensorDeviceClass.SIGNAL_STRENGTH,
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda p: p.tx_power,
+    ),
+    LanPonPortSensorDescription(
+        key="rx_power",
+        translation_key="lanpon_port_rx_power",
+        icon="mdi:signal",
+        native_unit_of_measurement="dBm",
+        device_class=SensorDeviceClass.SIGNAL_STRENGTH,
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda p: p.rx_power,
+    ),
+    LanPonPortSensorDescription(
+        key="temperature",
+        translation_key="lanpon_port_temperature",
+        icon="mdi:thermometer",
+        native_unit_of_measurement="°C",
+        device_class=SensorDeviceClass.TEMPERATURE,
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda p: p.temperature,
+    ),
+    LanPonPortSensorDescription(
+        key="voltage",
+        translation_key="lanpon_port_voltage",
+        icon="mdi:flash",
+        native_unit_of_measurement="V",
+        device_class=SensorDeviceClass.VOLTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda p: p.voltage,
+    ),
+    LanPonPortSensorDescription(
+        key="current",
+        translation_key="lanpon_port_current",
+        icon="mdi:current-dc",
+        native_unit_of_measurement="mA",
+        device_class=SensorDeviceClass.CURRENT,
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda p: p.current,
+    ),
 )
 
 
 LAN_PORT_SUFFIXES = {
-    "status": "link status",
+    "status": "link",
     "rate": "rate",
     "mode": "mode",
 }
 
 
 LANPON_PORT_SUFFIXES = {
-    "status": "optical status",
+    "status": "optical",
     "tx_power": "TX power",
     "rx_power": "RX power",
     "temperature": "temperature",
