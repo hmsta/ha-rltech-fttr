@@ -9,6 +9,11 @@ class RltechFttrStationTableCard extends HTMLElement {
     this._sortDir = 1;
     this._page = 0;
     this._pageSize = 25;
+    this._mobilePageSize = 10;
+    this._totalRows = 0;
+    this._filteredCount = 0;
+    this._pageCount = 1;
+    this._filterOptions = {};
     this._columns = [];
     this._mobileColumns = [];
     this._error = "";
@@ -25,6 +30,7 @@ class RltechFttrStationTableCard extends HTMLElement {
   setConfig(config) {
     this._config = {
       page_size: 25,
+      mobile_page_size: 10,
       page_size_options: [25, 50, 100],
       remember_preferences: true,
       search_debounce_ms: 150,
@@ -33,6 +39,7 @@ class RltechFttrStationTableCard extends HTMLElement {
       ...config,
     };
     this._pageSize = Number(this._config.page_size) || 25;
+    this._mobilePageSize = Number(this._config.mobile_page_size) || 10;
     this._columns = this._validColumns(this._config.columns, this._defaultColumns());
     this._mobileColumns = this._validColumns(this._config.mobile_columns, this._defaultMobileColumns());
     this._setupMediaQuery();
@@ -101,7 +108,7 @@ class RltechFttrStationTableCard extends HTMLElement {
   }
 
   _defaultMobileColumns() {
-    return ["hostname", "ip", "ssid", "reported_online", "rssi", "details"];
+    return ["hostname", "ip", "ssid", "ap_alias", "reported_online", "rssi", "details"];
   }
 
   _activeColumns() {
@@ -120,6 +127,18 @@ class RltechFttrStationTableCard extends HTMLElement {
     return this._isMobile ? this._defaultMobileColumns() : this._defaultColumns();
   }
 
+  _activePageSize() {
+    return this._isMobile ? this._mobilePageSize : this._pageSize;
+  }
+
+  _setActivePageSize(value) {
+    if (this._isMobile) {
+      this._mobilePageSize = value;
+    } else {
+      this._pageSize = value;
+    }
+  }
+
   _setupMediaQuery() {
     if (this._mediaQuery || !window.matchMedia) {
       this._isMobile = window.innerWidth <= 760;
@@ -133,7 +152,8 @@ class RltechFttrStationTableCard extends HTMLElement {
       if (this._shellRendered) {
         this._refreshColumnPicker();
         this._renderHeaders();
-        this._refreshTable();
+        this._refreshPageSize();
+        this._scheduleFetch(true);
       }
     };
     if (this._mediaQuery.addEventListener) {
@@ -168,6 +188,9 @@ class RltechFttrStationTableCard extends HTMLElement {
       if (Number.isFinite(Number(prefs.page_size))) {
         this._pageSize = Number(prefs.page_size);
       }
+      if (Number.isFinite(Number(prefs.mobile_page_size))) {
+        this._mobilePageSize = Number(prefs.mobile_page_size);
+      }
       if (typeof prefs.sort_key === "string") {
         this._sortKey = prefs.sort_key;
       }
@@ -192,6 +215,7 @@ class RltechFttrStationTableCard extends HTMLElement {
         columns: this._columns,
         mobile_columns: this._mobileColumns,
         page_size: this._pageSize,
+        mobile_page_size: this._mobilePageSize,
         sort_key: this._sortKey,
         sort_dir: this._sortDir,
         filters: this._filters,
@@ -204,6 +228,7 @@ class RltechFttrStationTableCard extends HTMLElement {
     this._columns = this._validColumns(this._config.columns, this._defaultColumns());
     this._mobileColumns = this._validColumns(this._config.mobile_columns, this._defaultMobileColumns());
     this._pageSize = Number(this._config.page_size) || 25;
+    this._mobilePageSize = Number(this._config.mobile_page_size) || 10;
     this._sortKey = "mac";
     this._sortDir = 1;
     this._filters = { ssid: "", ap: "", vlan: "", band: "", online: "" };
@@ -215,7 +240,7 @@ class RltechFttrStationTableCard extends HTMLElement {
     this._refreshColumnPicker();
     this._refreshPageSize();
     this._renderHeaders();
-    this._refreshTable();
+    this._scheduleFetch(true);
   }
 
   _validColumns(columns, fallback) {
@@ -228,13 +253,18 @@ class RltechFttrStationTableCard extends HTMLElement {
     return normalized.length ? normalized : fallback;
   }
 
-  _scheduleFetch() {
+  _scheduleFetch(immediate = false) {
     if (!this._hass) {
       return;
     }
-    const wait = Math.max(0, 5000 - (Date.now() - this._lastFetch));
+    const wait = immediate ? 0 : Math.max(0, 5000 - (Date.now() - this._lastFetch));
     if (this._fetchTimer) {
-      return;
+      if (immediate) {
+        window.clearTimeout(this._fetchTimer);
+        this._fetchTimer = null;
+      } else {
+        return;
+      }
     }
     this._fetchTimer = window.setTimeout(() => {
       this._fetchTimer = null;
@@ -256,8 +286,19 @@ class RltechFttrStationTableCard extends HTMLElement {
       const result = await this._hass.callWS({
         type: "rltech_fttr/get_stations",
         entry_id: entryId,
+        page: this._page,
+        page_size: this._activePageSize(),
+        search: this._search,
+        sort_key: this._sortKey,
+        sort_dir: this._sortDir,
+        filters: this._filters,
       });
       this._rows = result.stations || [];
+      this._page = Number(result.page || 0);
+      this._totalRows = Number(result.total || 0);
+      this._filteredCount = Number(result.filtered || 0);
+      this._pageCount = Number(result.page_count || 1);
+      this._filterOptions = result.filter_options || {};
       this._error = "";
       this._refreshFilterOptions();
     } catch (err) {
@@ -627,14 +668,14 @@ class RltechFttrStationTableCard extends HTMLElement {
     this.shadowRoot.getElementById("search").addEventListener("input", (event) => {
       this._search = event.target.value;
       this._page = 0;
-      this._debouncedRefreshTable();
+      this._debouncedFetch();
     });
     for (const key of ["ssid", "ap", "vlan", "band", "online"]) {
       this.shadowRoot.getElementById(key).addEventListener("change", (event) => {
         this._filters[key] = event.target.value;
         this._page = 0;
         this._savePreferences();
-        this._refreshTable();
+        this._scheduleFetch(true);
       });
     }
     this.shadowRoot.getElementById("clear-filters").addEventListener("click", () => this._clearFilters());
@@ -646,18 +687,18 @@ class RltechFttrStationTableCard extends HTMLElement {
     this.shadowRoot.addEventListener("click", () => this._closeOptions());
     this.shadowRoot.getElementById("reset").addEventListener("click", () => this._resetPreferences());
     this.shadowRoot.getElementById("page-size").addEventListener("change", (event) => {
-      this._pageSize = Number(event.target.value);
+      this._setActivePageSize(Number(event.target.value));
       this._page = 0;
       this._savePreferences();
-      this._refreshTable();
+      this._scheduleFetch(true);
     });
     this.shadowRoot.getElementById("prev").addEventListener("click", () => {
       this._page = Math.max(0, this._page - 1);
-      this._refreshTable();
+      this._scheduleFetch(true);
     });
     this.shadowRoot.getElementById("next").addEventListener("click", () => {
       this._page += 1;
-      this._refreshTable();
+      this._scheduleFetch(true);
     });
     this.shadowRoot.getElementById("dialog-close").addEventListener("click", () => {
       this.shadowRoot.getElementById("dialog").hidden = true;
@@ -705,26 +746,27 @@ class RltechFttrStationTableCard extends HTMLElement {
 
   _refreshPageSize() {
     const select = this.shadowRoot.getElementById("page-size");
-    const options = [...new Set([...(this._config.page_size_options || []), this._pageSize, 0])];
+    const pageSize = this._activePageSize();
+    const options = [...new Set([...(this._config.page_size_options || []), pageSize, 0])];
     select.innerHTML = options
       .filter((value) => Number.isFinite(Number(value)))
       .map((value) => `<option value="${Number(value)}">${Number(value) === 0 ? "All" : `${Number(value)} rows`}</option>`)
       .join("");
-    select.value = String(this._pageSize);
+    select.value = String(pageSize);
   }
 
   _refreshTable() {
     this._renderShell();
-    const filtered = this._filteredRows();
-    const rows = this._pageRows(filtered);
-    const start = filtered.length === 0 ? 0 : this._pageSize === 0 ? 1 : this._page * this._pageSize + 1;
-    const end = this._pageSize === 0 ? filtered.length : Math.min(filtered.length, start + rows.length - 1);
+    const rows = this._rows;
+    const pageSize = this._activePageSize();
+    const start = this._filteredCount === 0 ? 0 : pageSize === 0 ? 1 : this._page * pageSize + 1;
+    const end = pageSize === 0 ? this._filteredCount : Math.min(this._filteredCount, start + rows.length - 1);
     this.shadowRoot.getElementById("meta").textContent =
-      `${filtered.length} matched of ${this._rows.length}${this._error ? ` - ${this._error}` : ""}`;
+      `${this._filteredCount} matched of ${this._totalRows}${this._error ? ` - ${this._error}` : ""}`;
     this.shadowRoot.getElementById("page-info").textContent =
-      this._pageSize === 0 ? `All ${filtered.length}` : `${start}-${end} of ${filtered.length}`;
-    this.shadowRoot.getElementById("prev").disabled = this._page <= 0 || this._pageSize === 0;
-    this.shadowRoot.getElementById("next").disabled = this._pageSize === 0 || (this._page + 1) * this._pageSize >= filtered.length;
+      pageSize === 0 ? `All ${this._filteredCount}` : `${start}-${end} of ${this._filteredCount}`;
+    this.shadowRoot.getElementById("prev").disabled = this._page <= 0 || pageSize === 0;
+    this.shadowRoot.getElementById("next").disabled = pageSize === 0 || this._page >= this._pageCount - 1;
     this.shadowRoot.getElementById("clear-filters").hidden = !this._hasActiveFilters();
     const defs = new Map(this._columnDefs().map((col) => [col.key, col]));
     const columns = this._activeColumns();
@@ -758,17 +800,17 @@ class RltechFttrStationTableCard extends HTMLElement {
     if (!this.shadowRoot || !this._shellRendered) {
       return;
     }
-    this._setOptions("ssid", "SSID", (row) => row.ssid);
-    this._setOptions("ap", "AP", (row) => row.ap_alias || row.ap_mac);
-    this._setOptions("vlan", "VLAN", (row) => row.vlan);
-    this._setOptions("band", "Band", (row) => row.band);
+    this._setOptions("ssid", "SSID");
+    this._setOptions("ap", "AP");
+    this._setOptions("vlan", "VLAN");
+    this._setOptions("band", "Band");
     this.shadowRoot.getElementById("online").value = this._filters.online;
   }
 
-  _setOptions(id, label, valueFn) {
+  _setOptions(id, label) {
     const element = this.shadowRoot.getElementById(id);
     const current = this._filters[id];
-    const values = Array.from(new Set(this._rows.map(valueFn).filter((value) => value !== null && value !== undefined && value !== ""))).sort();
+    const values = (this._filterOptions[id] || []).map((value) => String(value));
     element.innerHTML = [`<option value="">${label}</option>`, ...values.map((value) => `<option value="${this._escape(value)}">${this._escape(value)}</option>`)].join("");
     element.value = values.includes(current) ? current : "";
     this._filters[id] = element.value;
@@ -787,7 +829,7 @@ class RltechFttrStationTableCard extends HTMLElement {
     this._page = 0;
     this._savePreferences();
     this._renderHeaders();
-    this._refreshTable();
+    this._scheduleFetch(true);
   }
 
   _showDetails(row) {
@@ -809,7 +851,7 @@ class RltechFttrStationTableCard extends HTMLElement {
     this.shadowRoot.getElementById("search").value = "";
     this._refreshFilterOptions();
     this._savePreferences();
-    this._refreshTable();
+    this._scheduleFetch(true);
   }
 
   _hasActiveFilters() {
@@ -825,13 +867,13 @@ class RltechFttrStationTableCard extends HTMLElement {
     this.shadowRoot.getElementById("options-menu").hidden = true;
   }
 
-  _debouncedRefreshTable() {
+  _debouncedFetch() {
     if (this._refreshTimer) {
       window.clearTimeout(this._refreshTimer);
     }
     this._refreshTimer = window.setTimeout(() => {
       this._refreshTimer = null;
-      this._refreshTable();
+      this._scheduleFetch(true);
     }, this._config.search_debounce_ms);
   }
 

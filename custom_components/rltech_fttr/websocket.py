@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any, Callable
+
 import voluptuous as vol
 
 from homeassistant.components import websocket_api
@@ -13,6 +15,8 @@ from .const import DOMAIN
 from .ap_inventory import ap_rows
 from .identifiers import AP_SENSOR_KEYS, ap_sensor_unique_id
 from .station_inventory import station_rows
+
+_PAGE_SIZE_MAX = 1000
 
 
 def async_setup_websocket(hass: HomeAssistant) -> None:
@@ -53,6 +57,12 @@ async def websocket_get_entries(
     {
         vol.Required("type"): "rltech_fttr/get_stations",
         vol.Required("entry_id"): str,
+        vol.Optional("page", default=0): vol.Coerce(int),
+        vol.Optional("page_size", default=0): vol.Coerce(int),
+        vol.Optional("search", default=""): str,
+        vol.Optional("sort_key", default="mac"): str,
+        vol.Optional("sort_dir", default=1): vol.In([1, -1]),
+        vol.Optional("filters", default={}): dict,
     }
 )
 @websocket_api.async_response
@@ -70,11 +80,49 @@ async def websocket_get_stations(
         )
         return
 
+    rows = station_rows(coordinator.data)
+    result = _table_result(
+        rows,
+        search=msg["search"],
+        filters=msg["filters"],
+        sort_key=msg["sort_key"],
+        sort_dir=msg["sort_dir"],
+        page=msg["page"],
+        page_size=msg["page_size"],
+        filter_specs={
+            "ssid": ("SSID", lambda row: row.get("ssid")),
+            "ap": ("AP", lambda row: row.get("ap_alias") or row.get("ap_mac")),
+            "vlan": ("VLAN", lambda row: row.get("vlan")),
+            "band": ("Band", lambda row: row.get("band")),
+        },
+        filter_predicates={
+            "ssid": lambda row, value: row.get("ssid") == value,
+            "ap": lambda row, value: (
+                row.get("ap_alias") or row.get("ap_mac") or ""
+            )
+            == value,
+            "vlan": lambda row, value: str(
+                row.get("vlan") if row.get("vlan") is not None else ""
+            )
+            == value,
+            "band": lambda row, value: row.get("band") == value,
+            "online": lambda row, value: (
+                "active" if row.get("reported_online") else "inactive"
+            )
+            == value,
+        },
+        sort_values={
+            "reported_online": lambda row: "active"
+            if row.get("reported_online")
+            else "inactive",
+        },
+    )
     connection.send_result(
         msg["id"],
         {
             "entry_id": entry_id,
-            "stations": station_rows(coordinator.data),
+            "stations": result["rows"],
+            **{key: value for key, value in result.items() if key != "rows"},
         },
     )
 
@@ -83,6 +131,12 @@ async def websocket_get_stations(
     {
         vol.Required("type"): "rltech_fttr/get_access_points",
         vol.Required("entry_id"): str,
+        vol.Optional("page", default=0): vol.Coerce(int),
+        vol.Optional("page_size", default=0): vol.Coerce(int),
+        vol.Optional("search", default=""): str,
+        vol.Optional("sort_key", default="online"): str,
+        vol.Optional("sort_dir", default=1): vol.In([1, -1]),
+        vol.Optional("filters", default={}): dict,
     }
 )
 @websocket_api.async_response
@@ -100,16 +154,162 @@ async def websocket_get_access_points(
         )
         return
 
+    rows = ap_rows(
+        coordinator.data,
+        _ap_registry_info(hass, entry_id, coordinator.data),
+    )
+    result = _table_result(
+        rows,
+        search=msg["search"],
+        filters=msg["filters"],
+        sort_key=msg["sort_key"],
+        sort_dir=msg["sort_dir"],
+        page=msg["page"],
+        page_size=msg["page_size"],
+        filter_specs={
+            "profile": ("Profile", lambda row: row.get("profile")),
+            "model": ("Model", lambda row: row.get("model")),
+            "uplink": ("Uplink", _uplink_label),
+        },
+        filter_predicates={
+            "state": lambda row, value: (
+                "online" if row.get("online") else "offline"
+            )
+            == value,
+            "profile": lambda row, value: row.get("profile") == value,
+            "model": lambda row, value: row.get("model") == value,
+            "uplink": lambda row, value: _uplink_label(row) == value,
+        },
+        sort_values={
+            "online": lambda row: 1 if row.get("online") else 0,
+            "uplink_label": _uplink_label,
+        },
+    )
     connection.send_result(
         msg["id"],
         {
             "entry_id": entry_id,
-            "access_points": ap_rows(
-                coordinator.data,
-                _ap_registry_info(hass, entry_id, coordinator.data),
-            ),
+            "access_points": result["rows"],
+            **{key: value for key, value in result.items() if key != "rows"},
         },
     )
+
+
+def _table_result(
+    rows: list[dict[str, Any]],
+    *,
+    search: str,
+    filters: dict[str, Any],
+    sort_key: str,
+    sort_dir: int,
+    page: int,
+    page_size: int,
+    filter_specs: dict[str, tuple[str, Callable[[dict[str, Any]], Any]]],
+    filter_predicates: dict[str, Callable[[dict[str, Any], str], bool]],
+    sort_values: dict[str, Callable[[dict[str, Any]], Any]] | None = None,
+) -> dict[str, Any]:
+    """Return filtered, sorted, paginated table rows and filter options."""
+    sort_values = sort_values or {}
+    search_text = search.strip().lower()
+    active_filters = {
+        key: str(value)
+        for key, value in filters.items()
+        if value is not None and str(value) != ""
+    }
+
+    filtered = [
+        row
+        for row in rows
+        if _matches_search(row, search_text)
+        and all(
+            filter_predicates[key](row, value)
+            for key, value in active_filters.items()
+            if key in filter_predicates
+        )
+    ]
+    filtered.sort(
+        key=lambda row: _sort_key(
+            sort_values.get(sort_key, lambda item: item.get(sort_key))(row)
+        ),
+        reverse=sort_dir == -1,
+    )
+
+    page_size = max(0, min(_PAGE_SIZE_MAX, page_size))
+    page = max(0, page)
+    if page_size:
+        page_count = max(1, (len(filtered) + page_size - 1) // page_size)
+        page = min(page, page_count - 1)
+        start = page * page_size
+        paged = filtered[start : start + page_size]
+    else:
+        page_count = 1
+        start = 0
+        paged = filtered
+
+    return {
+        "rows": paged,
+        "total": len(rows),
+        "filtered": len(filtered),
+        "page": page,
+        "page_size": page_size,
+        "page_count": page_count,
+        "filter_options": _filter_options(rows, filter_specs),
+    }
+
+
+def _matches_search(row: dict[str, Any], search: str) -> bool:
+    """Return whether a row matches free-text search."""
+    if not search:
+        return True
+    haystack = " ".join(
+        str(value)
+        for value in row.values()
+        if value is not None and not isinstance(value, dict)
+    ).lower()
+    return search in haystack
+
+
+def _filter_options(
+    rows: list[dict[str, Any]],
+    specs: dict[str, tuple[str, Callable[[dict[str, Any]], Any]]],
+) -> dict[str, list[Any]]:
+    """Return distinct filter option values."""
+    return {
+        key: sorted(
+            {
+                value
+                for row in rows
+                if (value := value_fn(row)) is not None and value != ""
+            },
+            key=lambda value: str(value).lower(),
+        )
+        for key, (_label, value_fn) in specs.items()
+    }
+
+
+def _sort_key(value: Any) -> tuple[int, Any]:
+    """Normalize sort values with empty values last."""
+    if value is None or value == "":
+        return (1, "")
+    if isinstance(value, bool):
+        return (0, int(value))
+    try:
+        return (0, float(value))
+    except (TypeError, ValueError):
+        return (0, str(value).lower())
+
+
+def _uplink_label(row: dict[str, Any]) -> str:
+    """Return AP uplink label for filtering and sorting."""
+    uplink = row.get("uplink")
+    if uplink is None:
+        return ""
+    port = "" if row.get("uplink_port") is None else f" {row['uplink_port']}"
+    if uplink == 0:
+        return f"LAN{port}"
+    if uplink == 2:
+        return f"LAN-PON{port}"
+    return f"Uplink {uplink}{port}"
 
 
 def _ap_registry_info(

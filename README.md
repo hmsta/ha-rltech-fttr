@@ -136,6 +136,7 @@ Both table cards accept:
 ```yaml
 entry_id: optional_config_entry_id
 page_size: 25
+mobile_page_size: 10
 page_size_options:
   - 25
   - 50
@@ -154,3 +155,6 @@ card's table options menu.
 
 Use `storage_key` if you place multiple cards for the same config entry on
 different dashboards and want separate remembered browser layouts.
+
+The AP table also accepts `default_sort_key` and `default_sort_dir`. By default
+APs are sorted by `online` ascending, so offline APs appear first.
