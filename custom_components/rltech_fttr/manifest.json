@@ -1,7 +1,7 @@
 {
   "codeowners": ["@hmsta"],
   "config_flow": true,
-  "dependencies": ["frontend", "lovelace"],
+  "dependencies": ["dhcp", "frontend", "lovelace"],
   "documentation": "https://github.com/hmsta/ha-rltech-fttr",
   "domain": "rltech_fttr",
   "iot_class": "local_polling",
