@@ -61,7 +61,7 @@ class RltechFttrApTableCard extends HTMLElement {
   _columnDefs() {
     return [
       ["details", "More", (_row, index) => this._detailsButton(index), () => ""],
-      ["alias", "Alias", (row) => this._escape(row.alias || row.mac), (row) => row.alias || row.mac, "alias"],
+      ["alias", "Alias", (row) => this._escape(row.alias || row.mac), (row) => row.alias || row.mac],
       ["mac", "MAC"],
       ["ip", "IP"],
       ["online", "State", (row) => this._stateCell(row), (row) => (row.online ? "online" : "offline"), "online"],
@@ -756,6 +756,9 @@ class RltechFttrApTableCard extends HTMLElement {
     for (const button of this.shadowRoot.querySelectorAll("button[data-entity]")) {
       button.addEventListener("click", () => this._openMoreInfo(button.dataset.entity));
     }
+    for (const button of this.shadowRoot.querySelectorAll("button[data-device]")) {
+      button.addEventListener("click", () => this._openDevice(button.dataset.device));
+    }
   }
 
   _mobileRow(row, index, defs, columns) {
@@ -778,6 +781,9 @@ class RltechFttrApTableCard extends HTMLElement {
       return col.render(row, index);
     }
     const value = col.render(row, index);
+    if (col.key === "alias" && row.device_id) {
+      return `<button class="entity-cell" type="button" data-device="${this._escape(row.device_id)}" title="Open device">${value}</button>`;
+    }
     const entityId = col.entityKey && row.entities ? row.entities[col.entityKey] : null;
     if (!entityId) {
       return value;
@@ -841,6 +847,14 @@ class RltechFttrApTableCard extends HTMLElement {
       composed: true,
       detail: { entityId },
     }));
+  }
+
+  _openDevice(deviceId) {
+    if (!deviceId) {
+      return;
+    }
+    window.history.pushState(null, "", `/config/devices/device/${encodeURIComponent(deviceId)}`);
+    window.dispatchEvent(new Event("location-changed"));
   }
 
   _clearFilters() {

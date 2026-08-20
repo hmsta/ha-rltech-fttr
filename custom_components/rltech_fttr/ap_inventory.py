@@ -34,11 +34,13 @@ def _detail_fields(detail: RltechApDetail | None) -> dict[str, Any]:
 
 def ap_to_row(
     ap: RltechAp,
-    entities: dict[str, str] | None = None,
+    registry_info: dict[str, Any] | None = None,
     detail: RltechApDetail | None = None,
 ) -> dict[str, Any]:
     """Return one AP row for UI/service use."""
+    registry_info = registry_info or {}
     return {
+        "device_id": registry_info.get("device_id"),
         "hardware_id": ap.sn,
         "mac": ap.mac,
         "alias": ap.alias,
@@ -58,20 +60,20 @@ def ap_to_row(
         "sn": ap.sn,
         "dev_sn": ap.dev_sn,
         "upgrade_flag": ap.upgrade_flag,
-        "entities": entities or {},
+        "entities": registry_info.get("entities") or {},
         **_detail_fields(detail),
     }
 
 
 def ap_rows(
     data: RltechData | None,
-    entity_ids: dict[str, dict[str, str]] | None = None,
+    registry_info: dict[str, dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Return stable, sorted AP rows from coordinator data."""
     if data is None:
         return []
     return [
-        ap_to_row(ap, (entity_ids or {}).get(ap.mac), data.ap_details.get(ap.mac))
+        ap_to_row(ap, (registry_info or {}).get(ap.mac), data.ap_details.get(ap.mac))
         for ap in sorted(
             data.aps.values(), key=lambda item: ((item.alias or "").lower(), item.mac)
         )

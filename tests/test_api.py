@@ -334,6 +334,7 @@ def test_ap_inventory_rows_are_serialized_for_table() -> None:
 
     assert rows == [
         {
+            "device_id": None,
             "hardware_id": "RLGM3BB8DCD0",
             "mac": "44:95:3B:B8:DC:D0",
             "alias": "Hall AP",

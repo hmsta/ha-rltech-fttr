@@ -6,6 +6,7 @@ import voluptuous as vol
 
 from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 
 from .const import DOMAIN
@@ -105,31 +106,46 @@ async def websocket_get_access_points(
             "entry_id": entry_id,
             "access_points": ap_rows(
                 coordinator.data,
-                _ap_entity_ids(hass, entry_id, coordinator.data),
+                _ap_registry_info(hass, entry_id, coordinator.data),
             ),
         },
     )
 
 
-def _ap_entity_ids(hass: HomeAssistant, entry_id: str, data) -> dict[str, dict[str, str]]:
-    """Return current HA entity IDs for AP sensors, keyed by AP MAC and sensor key."""
+def _ap_registry_info(
+    hass: HomeAssistant,
+    entry_id: str,
+    data,
+) -> dict[str, dict[str, object]]:
+    """Return current HA device/entity registry info, keyed by AP MAC."""
     if data is None:
         return {}
 
-    registry = er.async_get(hass)
-    result: dict[str, dict[str, str]] = {}
+    entity_registry = er.async_get(hass)
+    device_registry = dr.async_get(hass)
+    result: dict[str, dict[str, object]] = {}
     for mac, ap in data.aps.items():
         entities: dict[str, str] = {}
+        device = (
+            device_registry.async_get_device(
+                identifiers={(DOMAIN, f"{entry_id}_ap_{ap.sn}")},
+            )
+            if ap.sn
+            else None
+        )
         for key in AP_SENSOR_KEYS:
             unique_id = ap_sensor_unique_id(entry_id, ap, key)
             if unique_id is None:
                 continue
-            entity_id = registry.async_get_entity_id(
+            entity_id = entity_registry.async_get_entity_id(
                 "sensor",
                 DOMAIN,
                 unique_id,
             )
             if entity_id:
                 entities[key] = entity_id
-        result[mac] = entities
+        result[mac] = {
+            "device_id": device.id if device else None,
+            "entities": entities,
+        }
     return result
