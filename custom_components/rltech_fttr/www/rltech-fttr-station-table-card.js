@@ -163,7 +163,7 @@ class RltechFttrStationTableCard extends HTMLElement {
   }
 
   _storageKey() {
-    const key = this._config.storage_key || this._config.entry_id || "auto";
+    const key = this._config.storage_key || this._config.entry_id || this._resolvedEntryId || "auto";
     return `rltech_fttr.station_table.${key}`;
   }
 
@@ -171,7 +171,7 @@ class RltechFttrStationTableCard extends HTMLElement {
     if (this._config.storage_key || this._config.entry_id || !this._resolvedEntryId) {
       return [];
     }
-    return [`rltech_fttr.station_table.${this._resolvedEntryId}`];
+    return ["rltech_fttr.station_table.auto"];
   }
 
   _loadPreferences(force = false) {
@@ -344,6 +344,9 @@ class RltechFttrStationTableCard extends HTMLElement {
   async _entryId() {
     if (this._config.entry_id) {
       this._loadPreferences();
+      if (this._shellRendered) {
+        this._refreshPageSize();
+      }
       return this._config.entry_id;
     }
     if (!this._entryResolving) {
@@ -357,6 +360,7 @@ class RltechFttrStationTableCard extends HTMLElement {
         this._loadPreferences(true);
         this._refreshColumnPicker();
         this._renderHeaders();
+        this._refreshPageSize();
         return this._resolvedEntryId;
       }
       this._error = entries.length
@@ -407,13 +411,14 @@ class RltechFttrStationTableCard extends HTMLElement {
   }
 
   _pageRows(rows) {
-    if (this._pageSize === 0) {
+    const pageSize = this._activePageSize();
+    if (pageSize === 0) {
       return rows;
     }
-    const pageCount = Math.max(1, Math.ceil(rows.length / this._pageSize));
+    const pageCount = Math.max(1, Math.ceil(rows.length / pageSize));
     this._page = Math.min(this._page, pageCount - 1);
-    const start = this._page * this._pageSize;
-    return rows.slice(start, start + this._pageSize);
+    const start = this._page * pageSize;
+    return rows.slice(start, start + pageSize);
   }
 
   _renderShell() {
