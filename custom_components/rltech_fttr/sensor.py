@@ -522,7 +522,6 @@ class RltechOltStatusSensor(RltechEntity, SensorEntity):
 class RltechApSensor(RltechEntity, SensorEntity):
     """Managed AP sensor."""
 
-    _attr_has_entity_name = False
     entity_description: ApSensorDescription
 
     def __init__(
@@ -541,7 +540,7 @@ class RltechApSensor(RltechEntity, SensorEntity):
             raise ValueError(f"AP {mac} has no SN")
         self._attr_unique_id = unique_id
         hardware_id = ap.sn if ap else mac
-        self._attr_name = f"RLTech AP {hardware_id} {SENSOR_NAMES[description.key]}"
+        self._attr_name = SENSOR_NAMES[description.key]
         self._attr_suggested_object_id = (
             f"rltech_ap_{slugify(hardware_id)}_{description.key}"
         )
@@ -579,7 +578,6 @@ class RltechApSensor(RltechEntity, SensorEntity):
 class RltechApDetailSensor(RltechEntity, SensorEntity):
     """Slow managed AP detail sensor."""
 
-    _attr_has_entity_name = False
     entity_description: ApDetailSensorDescription
 
     def __init__(
@@ -598,7 +596,7 @@ class RltechApDetailSensor(RltechEntity, SensorEntity):
             raise ValueError(f"AP {mac} has no SN")
         self._attr_unique_id = unique_id
         hardware_id = ap.sn if ap else mac
-        self._attr_name = f"RLTech AP {hardware_id} {SENSOR_NAMES[description.key]}"
+        self._attr_name = SENSOR_NAMES[description.key]
         self._attr_suggested_object_id = (
             f"rltech_ap_{slugify(hardware_id)}_{description.key}"
         )
