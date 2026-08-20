@@ -50,7 +50,7 @@ def ap_device_info(entry: ConfigEntry, mac: str, ap: RltechAp | None) -> DeviceI
         connections={(dr.CONNECTION_NETWORK_MAC, mac)},
         identifiers={(DOMAIN, f"{entry.entry_id}_ap_{hardware_id}")},
         manufacturer="RLTech",
-        name=ap.alias if ap and ap.alias else f"RLTech AP {hardware_id or mac}",
+        name=f"RLTech AP {ap.alias}" if ap and ap.alias else f"RLTech AP {hardware_id or mac}",
         model=ap.model if ap else None,
         sw_version=ap.version if ap else None,
         serial_number=ap.sn if ap else None,
