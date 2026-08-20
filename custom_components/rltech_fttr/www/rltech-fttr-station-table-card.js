@@ -494,8 +494,8 @@ class RltechFttrStationTableCard extends HTMLElement {
         }
         .menu-button { width: 100%; }
         .table-wrap {
-          max-height: 620px;
-          overflow: auto;
+          overflow-x: auto;
+          overflow-y: visible;
           width: 100%;
         }
         table {
