@@ -495,6 +495,32 @@ def test_ap_detail_due_respects_interval() -> None:
     ) == [ap]
 
 
+def test_ap_detail_due_covers_missing_details_without_starvation() -> None:
+    client = api.RltechClient("http://example.invalid", "u", "p")
+    start = datetime(2026, 8, 20, 1, 0, tzinfo=UTC)
+    aps = {
+        f"44:95:3B:B8:E0:{index:02X}": models.RltechAp(
+            mac=f"44:95:3B:B8:E0:{index:02X}",
+            sn=f"RLGM3BB8E0{index:02X}",
+        )
+        for index in range(29)
+    }
+    seen: set[str] = set()
+
+    for offset in range(0, 600, 60):
+        due = client._ap_detail_due(
+            aps,
+            None,
+            now=start + timedelta(seconds=offset),
+            scan_interval=60,
+            detail_interval=600,
+        )
+        assert len(due) <= 3
+        seen.update(ap.sn for ap in due if ap.sn)
+
+    assert seen == {ap.sn for ap in aps.values()}
+
+
 def test_parse_olt_status_optional_fields() -> None:
     status = api.parse_olt_status(
         """

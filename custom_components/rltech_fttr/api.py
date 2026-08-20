@@ -913,10 +913,23 @@ class RltechClient:
             return []
         previous_details = previous.ap_details if previous is not None else {}
         due: list[tuple[float, str, RltechAp]] = []
-        slot = int(now.timestamp()) % detail_interval
-        scan_window = max(1, scan_interval)
-        for ap in aps.values():
+        polls_per_detail_interval = max(1, detail_interval // max(1, scan_interval))
+        max_per_poll = max(
+            1, (len(aps) + polls_per_detail_interval - 1) // polls_per_detail_interval
+        )
+        poll_bucket = (int(now.timestamp()) // max(1, scan_interval)) % polls_per_detail_interval
+        ordered_aps = sorted(
+            aps.values(),
+            key=lambda ap: (
+                zlib.crc32((ap.sn or ap.mac).encode("utf-8")),
+                ap.sn or ap.mac,
+            ),
+        )
+        for index, ap in enumerate(ordered_aps):
             if not ap.sn:
+                continue
+            ap_bucket = (index // max_per_poll) % polls_per_detail_interval
+            if ap_bucket != poll_bucket:
                 continue
             detail = previous_details.get(ap.mac)
             if detail is not None and detail.last_update is not None:
@@ -925,14 +938,9 @@ class RltechClient:
                     continue
                 priority = age
             else:
-                offset = zlib.crc32(ap.sn.encode("utf-8")) % detail_interval
-                if (slot - offset) % detail_interval >= scan_window:
-                    continue
                 priority = float(detail_interval)
             due.append((priority, ap.sn, ap))
 
-        polls_per_detail_interval = max(1, detail_interval // max(1, scan_interval))
-        max_per_poll = max(1, (len(aps) + polls_per_detail_interval - 1) // polls_per_detail_interval)
         due.sort(key=lambda item: (-item[0], item[1]))
         return [ap for _, _, ap in due[:max_per_poll]]
 
