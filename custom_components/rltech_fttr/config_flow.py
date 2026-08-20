@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import urlsplit
 
 import voluptuous as vol
 
@@ -40,6 +41,32 @@ from .const import (
 )
 
 
+def _base_url_to_host(value: str | None) -> str:
+    """Return the host portion of a stored base URL for display in the form."""
+    if not value:
+        return _base_url_to_host(DEFAULT_BASE_URL)
+    text = str(value).strip()
+    if "://" in text:
+        parsed = urlsplit(text)
+        return parsed.hostname or parsed.netloc.split(":", 1)[0] or text
+    if ":" in text and text.rsplit(":", 1)[1].isdigit():
+        return text.rsplit(":", 1)[0]
+    return text.rstrip("/")
+
+
+def _host_to_base_url(value: str) -> str:
+    """Normalize a host/IP form value to the fixed RLTech Web UI base URL."""
+    text = str(value).strip().rstrip("/")
+    if "://" in text:
+        parsed = urlsplit(text)
+        host = parsed.hostname or parsed.netloc.split(":", 1)[0]
+    elif ":" in text and text.rsplit(":", 1)[1].isdigit():
+        host = text.rsplit(":", 1)[0]
+    else:
+        host = text
+    return f"http://{host}:8080"
+
+
 def _schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
     defaults = defaults or {}
     password_selector = selector.TextSelector(
@@ -53,7 +80,8 @@ def _schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
         )
     schema: dict[Any, Any] = {
         vol.Required(
-            CONF_BASE_URL, default=defaults.get(CONF_BASE_URL, DEFAULT_BASE_URL)
+            CONF_BASE_URL,
+            default=_base_url_to_host(defaults.get(CONF_BASE_URL, DEFAULT_BASE_URL)),
         ): str,
         vol.Required(
             CONF_USERNAME, default=defaults.get(CONF_USERNAME, DEFAULT_USERNAME)
@@ -138,6 +166,7 @@ class RltechConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
+            user_input[CONF_BASE_URL] = _host_to_base_url(user_input[CONF_BASE_URL])
             unique_id = user_input[CONF_BASE_URL].rstrip("/")
             await self.async_set_unique_id(unique_id)
             self._abort_if_unique_id_configured()
@@ -170,6 +199,7 @@ class RltechConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         defaults = {**entry.data}
 
         if user_input is not None:
+            user_input[CONF_BASE_URL] = _host_to_base_url(user_input[CONF_BASE_URL])
             if not user_input.get(CONF_PASSWORD):
                 user_input = {
                     key: value

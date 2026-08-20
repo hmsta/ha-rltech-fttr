@@ -48,7 +48,8 @@ Copy `custom_components/rltech_fttr` into Home Assistant's
 
 Add the integration from the Home Assistant UI. Required fields:
 
-- Base URL, for example `http://192.168.1.1`
+- OLT IP address or hostname, for example `192.168.1.1`. The integration
+  automatically uses `http://` and port `8080`.
 - Username
 - Password
 - Scan interval, default `60` seconds

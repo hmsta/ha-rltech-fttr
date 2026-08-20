@@ -5,7 +5,7 @@
         "title": "RLTech FTTR",
         "description": "Connect to the RLTech OLT Web UI.",
         "data": {
-          "base_url": "Base URL",
+          "base_url": "OLT IP address or hostname",
           "username": "Username",
           "password": "Password",
           "scan_interval": "Scan interval",
@@ -22,7 +22,7 @@
       "reconfigure": {
         "title": "Reconfigure RLTech FTTR",
         "data": {
-          "base_url": "Base URL",
+          "base_url": "OLT IP address or hostname",
           "username": "Username",
           "password": "Password",
           "scan_interval": "Scan interval",
