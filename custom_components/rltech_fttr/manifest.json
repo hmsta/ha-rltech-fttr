@@ -1,0 +1,13 @@
+{
+  "codeowners": ["@hmsta"],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/hmsta/ha-rltech-fttr",
+  "domain": "rltech_fttr",
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/hmsta/ha-rltech-fttr/issues",
+  "name": "RLTech FTTR",
+  "requirements": [],
+  "version": "0.1.0"
+}
+

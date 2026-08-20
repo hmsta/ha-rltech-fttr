@@ -1,0 +1,80 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "RLTech FTTR",
+        "description": "Connect to the RLTech OLT Web UI.",
+        "data": {
+          "base_url": "Base URL",
+          "username": "Username",
+          "password": "Password",
+          "scan_interval": "Scan interval",
+          "station_retention": "Station retention",
+          "enable_ap_polling": "Enable AP inventory polling",
+          "enable_station_polling": "Enable station inventory polling",
+          "enable_olt_status": "Enable OLT status sensors",
+          "enable_lan_port_status": "Enable LAN port status sensors",
+          "enable_ap_detail_polling": "Enable AP optical detail polling",
+          "ap_detail_interval": "AP optical detail interval"
+        }
+      },
+      "reconfigure": {
+        "title": "Reconfigure RLTech FTTR",
+        "data": {
+          "base_url": "Base URL",
+          "username": "Username",
+          "password": "Password",
+          "scan_interval": "Scan interval",
+          "station_retention": "Station retention",
+          "enable_ap_polling": "Enable AP inventory polling",
+          "enable_station_polling": "Enable station inventory polling",
+          "enable_olt_status": "Enable OLT status sensors",
+          "enable_lan_port_status": "Enable LAN port status sensors",
+          "enable_ap_detail_polling": "Enable AP optical detail polling",
+          "ap_detail_interval": "AP optical detail interval"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "The OLT rejected the configured credentials.",
+      "account_busy": "The OLT Web UI account is already in use.",
+      "cannot_connect": "Cannot connect to the OLT.",
+      "unknown": "Unexpected error."
+    },
+    "abort": {
+      "already_configured": "This OLT is already configured.",
+      "reconfigure_successful": "Reconfiguration successful."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "ap_count": { "name": "AP count" },
+      "online_ap_count": { "name": "Online AP count" },
+      "reported_station_count": { "name": "Reported station count" },
+      "poll_duration": { "name": "Poll duration" },
+      "last_success": { "name": "Last successful poll" },
+      "cpu_temperature": { "name": "CPU temperature" },
+      "last_boot": { "name": "Last boot" },
+      "wan_link_up_since": { "name": "WAN link up since" },
+      "lan_port_status": { "name": "LAN port link status" },
+      "lan_port_rate": { "name": "LAN port rate" },
+      "lan_port_mode": { "name": "LAN port mode" },
+      "lanpon_port_status": { "name": "LANPON optical status" },
+      "lanpon_port_tx_power": { "name": "LANPON TX power" },
+      "lanpon_port_rx_power": { "name": "LANPON RX power" },
+      "lanpon_port_temperature": { "name": "LANPON temperature" },
+      "lanpon_port_voltage": { "name": "LANPON voltage" },
+      "lanpon_port_current": { "name": "LANPON current" },
+      "ap_online": { "name": "Online" },
+      "ap_assoc_count": { "name": "Associated clients" },
+      "ap_profile": { "name": "Profile" },
+      "ap_alias": { "name": "Alias" },
+      "ap_optical_rx_power": { "name": "Optical RX power" },
+      "ap_optical_tx_power": { "name": "Optical TX power" },
+      "ap_downstream_optical_rx_power": { "name": "Downstream optical RX power" },
+      "ap_optical_temperature": { "name": "Optical temperature" },
+      "ap_optical_voltage": { "name": "Optical voltage" },
+      "ap_optical_current": { "name": "Optical current" }
+    }
+  }
+}
