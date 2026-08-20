@@ -422,6 +422,10 @@ class RltechFttrApTableCard extends HTMLElement {
           overflow: hidden;
           width: 100%;
         }
+        ha-card, .wrap, table, th, td, button, .mobile-list, .details, .entity-cell {
+          -webkit-user-select: text;
+          user-select: text;
+        }
         .wrap {
           box-sizing: border-box;
           min-width: 0;
