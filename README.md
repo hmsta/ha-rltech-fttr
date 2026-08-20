@@ -8,7 +8,36 @@ LAN/LAN-PON status. Optional AP optical details are polled on a slower interval.
 The integration logs out immediately after each poll so the single Web UI
 session is not kept open.
 
-## Install
+## HACS install
+
+This repository can be installed with HACS as a custom integration.
+
+1. Open HACS in Home Assistant.
+2. Open the three-dot menu and choose **Custom repositories**.
+3. Add this repository URL:
+
+   ```text
+   https://github.com/hmsta/ha-rltech-fttr
+   ```
+
+4. Select **Integration** as the category.
+5. Install **RLTech FTTR** from HACS.
+6. Restart Home Assistant.
+7. Add the integration from **Settings > Devices & services**.
+
+HACS installs the integration files, including the bundled table card
+JavaScript. Home Assistant still requires Lovelace resources to be registered
+before custom cards can be used on a dashboard. Add these dashboard resources
+after the integration is installed:
+
+```text
+/rltech_fttr/rltech-fttr-station-table-card.js
+/rltech_fttr/rltech-fttr-ap-table-card.js
+```
+
+Resource type: JavaScript module.
+
+## Manual install
 
 Copy `custom_components/rltech_fttr` into Home Assistant's
 `custom_components` directory and restart Home Assistant.
@@ -52,14 +81,7 @@ and IP address; it does not create station entities or persist station data.
 
 ## Station table card
 
-Add these JavaScript resources to Lovelace:
-
-```text
-/rltech_fttr/rltech-fttr-station-table-card.js
-/rltech_fttr/rltech-fttr-ap-table-card.js
-```
-
-Then add a station card:
+Add a station card:
 
 ```yaml
 type: custom:rltech-fttr-station-table-card
