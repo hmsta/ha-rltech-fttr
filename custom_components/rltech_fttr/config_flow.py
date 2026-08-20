@@ -54,6 +54,11 @@ def _base_url_to_host(value: str | None) -> str:
     return text.rstrip("/")
 
 
+def _entry_title(base_url: str) -> str:
+    """Return a readable integration title for a normalized base URL."""
+    return f"RLTech FTTR {_base_url_to_host(base_url)}"
+
+
 def _host_to_base_url(value: str) -> str:
     """Normalize a host/IP form value to the fixed RLTech Web UI base URL."""
     text = str(value).strip().rstrip("/")
@@ -180,7 +185,7 @@ class RltechConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors["base"] = "cannot_connect"
             else:
                 return self.async_create_entry(
-                    title=f"RLTech FTTR {unique_id}",
+                    title=_entry_title(unique_id),
                     data=user_input,
                 )
 
@@ -223,7 +228,7 @@ class RltechConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self.hass.config_entries.async_update_entry(
                     entry,
                     unique_id=unique_id,
-                    title=f"RLTech FTTR {unique_id}",
+                    title=_entry_title(unique_id),
                     data=data,
                 )
                 await self.hass.config_entries.async_reload(entry.entry_id)

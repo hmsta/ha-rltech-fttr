@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from urllib.parse import urlsplit
 from urllib.parse import urlunsplit
 
 from homeassistant.config_entries import ConfigEntry
@@ -24,6 +25,12 @@ class RltechEntity(CoordinatorEntity[RltechCoordinator]):
         self.config_entry = entry
 
 
+def _base_url_to_host(value: str) -> str:
+    """Return the host portion of a normalized base URL."""
+    parsed = urlsplit(value)
+    return parsed.hostname or parsed.netloc.split(":", 1)[0] or value
+
+
 def controller_device_info(
     entry: ConfigEntry,
     status: RltechOltStatus | None = None,
@@ -33,7 +40,7 @@ def controller_device_info(
     return DeviceInfo(
         identifiers={(DOMAIN, entry.entry_id)},
         manufacturer=status.manufacturer if status and status.manufacturer else "RLTech",
-        name=f"RLTech FTTR {base_url}",
+        name=f"RLTech FTTR {_base_url_to_host(base_url)}",
         model=status.gateway_type if status else None,
         hw_version=status.hardware_version if status else None,
         sw_version=status.software_version if status else None,
