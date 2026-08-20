@@ -23,6 +23,7 @@ from .const import (
     CONF_SCAN_INTERVAL,
     CONF_ENABLE_STATION_POLLING,
     DEFAULT_BASE_URL,
+    DEFAULT_USERNAME,
     DEFAULT_AP_DETAIL_INTERVAL,
     DEFAULT_ENABLE_AP_DETAIL_POLLING,
     DEFAULT_ENABLE_AP_POLLING,
@@ -47,50 +48,60 @@ def _schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
         vol.Required(
             CONF_BASE_URL, default=defaults.get(CONF_BASE_URL, DEFAULT_BASE_URL)
         ): str,
-        vol.Required(CONF_USERNAME, default=defaults.get(CONF_USERNAME, "")): str,
-        vol.Optional(
-            CONF_SCAN_INTERVAL,
-            default=defaults.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
-        ): vol.All(vol.Coerce(int), vol.Range(min=MIN_SCAN_INTERVAL)),
-        vol.Optional(
-            CONF_STATION_RETENTION,
-            default=defaults.get(CONF_STATION_RETENTION, DEFAULT_STATION_RETENTION),
-        ): vol.All(vol.Coerce(int), vol.Range(min=0)),
-        vol.Optional(
-            CONF_ENABLE_AP_POLLING,
-            default=defaults.get(CONF_ENABLE_AP_POLLING, DEFAULT_ENABLE_AP_POLLING),
-        ): bool,
-        vol.Optional(
-            CONF_ENABLE_STATION_POLLING,
-            default=defaults.get(
-                CONF_ENABLE_STATION_POLLING, DEFAULT_ENABLE_STATION_POLLING
-            ),
-        ): bool,
-        vol.Optional(
-            CONF_ENABLE_OLT_STATUS,
-            default=defaults.get(CONF_ENABLE_OLT_STATUS, DEFAULT_ENABLE_OLT_STATUS),
-        ): bool,
-        vol.Optional(
-            CONF_ENABLE_LAN_PORT_STATUS,
-            default=defaults.get(
-                CONF_ENABLE_LAN_PORT_STATUS, DEFAULT_ENABLE_LAN_PORT_STATUS
-            ),
-        ): bool,
-        vol.Optional(
-            CONF_ENABLE_AP_DETAIL_POLLING,
-            default=defaults.get(
-                CONF_ENABLE_AP_DETAIL_POLLING, DEFAULT_ENABLE_AP_DETAIL_POLLING
-            ),
-        ): bool,
-        vol.Optional(
-            CONF_AP_DETAIL_INTERVAL,
-            default=defaults.get(CONF_AP_DETAIL_INTERVAL, DEFAULT_AP_DETAIL_INTERVAL),
-        ): vol.All(vol.Coerce(int), vol.Range(min=MIN_AP_DETAIL_INTERVAL)),
+        vol.Required(
+            CONF_USERNAME, default=defaults.get(CONF_USERNAME, DEFAULT_USERNAME)
+        ): str,
     }
     if CONF_PASSWORD in defaults:
         schema[vol.Optional(CONF_PASSWORD)] = password_selector
     else:
         schema[vol.Required(CONF_PASSWORD)] = password_selector
+    schema.update(
+        {
+            vol.Optional(
+                CONF_SCAN_INTERVAL,
+                default=defaults.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
+            ): vol.All(vol.Coerce(int), vol.Range(min=MIN_SCAN_INTERVAL)),
+            vol.Optional(
+                CONF_STATION_RETENTION,
+                default=defaults.get(CONF_STATION_RETENTION, DEFAULT_STATION_RETENTION),
+            ): vol.All(vol.Coerce(int), vol.Range(min=0)),
+            vol.Optional(
+                CONF_ENABLE_AP_POLLING,
+                default=defaults.get(
+                    CONF_ENABLE_AP_POLLING, DEFAULT_ENABLE_AP_POLLING
+                ),
+            ): bool,
+            vol.Optional(
+                CONF_ENABLE_STATION_POLLING,
+                default=defaults.get(
+                    CONF_ENABLE_STATION_POLLING, DEFAULT_ENABLE_STATION_POLLING
+                ),
+            ): bool,
+            vol.Optional(
+                CONF_ENABLE_OLT_STATUS,
+                default=defaults.get(CONF_ENABLE_OLT_STATUS, DEFAULT_ENABLE_OLT_STATUS),
+            ): bool,
+            vol.Optional(
+                CONF_ENABLE_LAN_PORT_STATUS,
+                default=defaults.get(
+                    CONF_ENABLE_LAN_PORT_STATUS, DEFAULT_ENABLE_LAN_PORT_STATUS
+                ),
+            ): bool,
+            vol.Optional(
+                CONF_ENABLE_AP_DETAIL_POLLING,
+                default=defaults.get(
+                    CONF_ENABLE_AP_DETAIL_POLLING, DEFAULT_ENABLE_AP_DETAIL_POLLING
+                ),
+            ): bool,
+            vol.Optional(
+                CONF_AP_DETAIL_INTERVAL,
+                default=defaults.get(
+                    CONF_AP_DETAIL_INTERVAL, DEFAULT_AP_DETAIL_INTERVAL
+                ),
+            ): vol.All(vol.Coerce(int), vol.Range(min=MIN_AP_DETAIL_INTERVAL)),
+        }
+    )
     return vol.Schema(schema)
 
 
