@@ -90,7 +90,7 @@ class RltechFttrStationTableCard extends HTMLElement {
   }
 
   _defaultColumns() {
-    return ["mac", "ip", "hostname", "ssid", "ap_alias", "reported_online", "rssi", "band", "channel", "vlan", "uptime", "last_seen", "details"];
+    return ["hostname", "ip", "ssid", "ap_alias", "reported_online", "rssi", "details"];
   }
 
   _defaultMobileColumns() {
@@ -391,14 +391,38 @@ class RltechFttrStationTableCard extends HTMLElement {
         </div>
       </ha-card>
       <style>
-        .wrap { padding: 12px; }
+        :host {
+          display: block;
+          min-width: 0;
+          width: 100%;
+        }
+        ha-card {
+          display: block;
+          max-width: 100%;
+          overflow: hidden;
+          width: 100%;
+        }
+        .wrap {
+          box-sizing: border-box;
+          min-width: 0;
+          padding: 12px;
+          width: 100%;
+        }
         .toolbar {
           align-items: center;
-          display: grid;
+          display: flex;
+          flex-wrap: wrap;
           gap: 8px;
-          grid-template-columns: minmax(180px, 1fr) repeat(5, minmax(92px, 140px)) auto auto auto;
           margin-bottom: 8px;
           position: relative;
+        }
+        .toolbar input {
+          flex: 1 1 220px;
+          min-width: 160px;
+        }
+        .toolbar select {
+          flex: 0 1 132px;
+          min-width: 92px;
         }
         input, select, button {
           background: var(--card-background-color);
@@ -465,10 +489,11 @@ class RltechFttrStationTableCard extends HTMLElement {
         .table-wrap {
           max-height: 620px;
           overflow: auto;
+          width: 100%;
         }
         table {
           border-collapse: collapse;
-          min-width: 980px;
+          min-width: max-content;
           width: 100%;
         }
         th, td {
@@ -568,11 +593,10 @@ class RltechFttrStationTableCard extends HTMLElement {
         }
         @media (max-width: 760px) {
           .wrap { padding: 10px; }
-          .toolbar {
-            grid-template-columns: 1fr 1fr auto;
-          }
-          #search, #ssid, #ap {
-            grid-column: span 3;
+          .toolbar input,
+          .toolbar select {
+            flex: 1 1 calc(50% - 8px);
+            min-width: 0;
           }
           .table-wrap { display: none; }
           .mobile-list { display: block; }
