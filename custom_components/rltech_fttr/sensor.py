@@ -7,6 +7,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 import logging
+from urllib.parse import urlsplit
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -22,10 +23,10 @@ from homeassistant.const import (
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.util import slugify
 
 from .const import (
     CONF_AP_AREA_ID,
+    CONF_BASE_URL,
     CONF_ENABLE_HARDWARE_STATUS,
     DEFAULT_ENABLE_HARDWARE_STATUS,
     DOMAIN,
@@ -37,7 +38,12 @@ from .entity import (
     controller_device_info,
     legacy_olt_device_info,
 )
-from .identifiers import ap_sensor_unique_id
+from .identifiers import (
+    ap_sensor_object_id,
+    ap_sensor_unique_id,
+    controller_sensor_object_id,
+    lan_port_sensor_object_id,
+)
 from .models import (
     RltechAp,
     RltechApDetail,
@@ -48,6 +54,23 @@ from .models import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _base_url_to_host(value: str) -> str:
+    """Return the host portion of a normalized base URL."""
+    parsed = urlsplit(value)
+    return parsed.hostname or parsed.netloc.split(":", 1)[0] or value
+
+
+def _entry_host(entry: ConfigEntry) -> str:
+    """Return the configured controller host."""
+    return _base_url_to_host(entry.data[CONF_BASE_URL].rstrip("/"))
+
+
+def _set_entity_object_id(entity: SensorEntity, object_id: str) -> None:
+    """Set a stable initial HA entity ID and matching suggested object ID."""
+    entity._attr_suggested_object_id = object_id
+    entity.entity_id = f"sensor.{object_id}"
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -506,7 +529,10 @@ class RltechControllerSensor(RltechEntity, SensorEntity):
         self.entity_description = description
         self._attr_unique_id = f"{entry.entry_id}_{description.key}"
         self._attr_name = SENSOR_NAMES[description.key]
-        self._attr_suggested_object_id = f"rltech_fttr_{description.key}"
+        _set_entity_object_id(
+            self,
+            controller_sensor_object_id(_entry_host(entry), description.key),
+        )
         self._attr_device_info = controller_device_info(entry)
 
     @property
@@ -531,7 +557,10 @@ class RltechOltStatusSensor(RltechEntity, SensorEntity):
         self.entity_description = description
         self._attr_unique_id = f"{entry.entry_id}_olt_{description.key}"
         self._attr_name = SENSOR_NAMES[description.key]
-        self._attr_suggested_object_id = f"rltech_fttr_olt_{description.key}"
+        _set_entity_object_id(
+            self,
+            controller_sensor_object_id(_entry_host(entry), description.key),
+        )
         self._attr_device_info = controller_device_info(entry)
 
     @property
@@ -563,8 +592,9 @@ class RltechLegacyOltStatusSensor(RltechEntity, SensorEntity):
         self.entity_description = description
         self._attr_unique_id = f"{entry.entry_id}_legacy_olt_{host}_{description.key}"
         self._attr_name = SENSOR_NAMES[description.key]
-        self._attr_suggested_object_id = (
-            f"rltech_olt_{slugify(host)}_{description.key}"
+        _set_entity_object_id(
+            self,
+            controller_sensor_object_id(host, description.key),
         )
 
     @property
@@ -610,10 +640,13 @@ class RltechApSensor(RltechEntity, SensorEntity):
         if unique_id is None:
             raise ValueError(f"AP {mac} has no SN")
         self._attr_unique_id = unique_id
-        hardware_id = ap.sn if ap else mac
         self._attr_name = SENSOR_NAMES[description.key]
-        self._attr_suggested_object_id = (
-            f"rltech_ap_{slugify(hardware_id)}_{description.key}"
+        object_id = ap_sensor_object_id(ap, description.key)
+        if object_id is None:
+            raise ValueError(f"AP {mac} has no SN")
+        _set_entity_object_id(
+            self,
+            object_id,
         )
 
     @property
@@ -666,10 +699,13 @@ class RltechApDetailSensor(RltechEntity, SensorEntity):
         if unique_id is None:
             raise ValueError(f"AP {mac} has no SN")
         self._attr_unique_id = unique_id
-        hardware_id = ap.sn if ap else mac
         self._attr_name = SENSOR_NAMES[description.key]
-        self._attr_suggested_object_id = (
-            f"rltech_ap_{slugify(hardware_id)}_{description.key}"
+        object_id = ap_sensor_object_id(ap, description.key)
+        if object_id is None:
+            raise ValueError(f"AP {mac} has no SN")
+        _set_entity_object_id(
+            self,
+            object_id,
         )
 
     @property
@@ -729,9 +765,13 @@ class RltechLanPortSensor(RltechEntity, SensorEntity):
         label = f"LANPON{port - 4}" if port > 4 else f"LAN-{port}"
         suffix = LAN_PORT_SUFFIXES[description.key]
         self._attr_name = f"{label} {suffix}"
-        object_prefix = f"rltech_olt_{slugify(source_host)}_" if source_host else ""
-        self._attr_suggested_object_id = (
-            f"{object_prefix}{slugify(label)}_{description.key}"
+        _set_entity_object_id(
+            self,
+            lan_port_sensor_object_id(
+                source_host or _entry_host(entry),
+                label,
+                description.key,
+            ),
         )
 
     @property
@@ -804,9 +844,13 @@ class RltechLanPonPortSensor(RltechEntity, SensorEntity):
         label = f"LANPON{ponid}"
         suffix = LANPON_PORT_SUFFIXES[description.key]
         self._attr_name = f"{label} {suffix}"
-        object_prefix = f"rltech_olt_{slugify(source_host)}_" if source_host else ""
-        self._attr_suggested_object_id = (
-            f"{object_prefix}{slugify(label)}_{description.key}"
+        _set_entity_object_id(
+            self,
+            lan_port_sensor_object_id(
+                source_host or _entry_host(entry),
+                label,
+                description.key,
+            ),
         )
 
     @property

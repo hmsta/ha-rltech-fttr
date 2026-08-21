@@ -415,6 +415,31 @@ def test_ap_sensor_unique_id_prefers_serial() -> None:
     assert "optical_rx_power" in identifiers.AP_SENSOR_KEYS
 
 
+def test_stable_sensor_object_ids_use_hardware_identity() -> None:
+    ap = models.RltechAp(
+        mac="44:95:3B:B8:E0:70",
+        sn="RLGM3BB8E070",
+        alias="House66",
+    )
+
+    assert (
+        identifiers.ap_sensor_object_id(ap, "profile")
+        == "rltech_ap_rlgm3bb8e070_profile"
+    )
+    assert (
+        identifiers.controller_sensor_object_id("172.20.11.1", "last_boot")
+        == "rltech_olt_172_20_11_1_last_boot"
+    )
+    assert (
+        identifiers.lan_port_sensor_object_id(
+            "172.20.11.1",
+            "LANPON2",
+            "rx_power",
+        )
+        == "rltech_olt_172_20_11_1_lanpon2_rx_power"
+    )
+
+
 def test_ap_hardware_id_does_not_use_dev_sn() -> None:
     ap = models.RltechAp(
         mac="44:95:3B:B8:DC:D0",
