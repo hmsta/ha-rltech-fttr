@@ -19,6 +19,8 @@ class RltechFttrStationTableCard extends HTMLElement {
     this._error = "";
     this._lastFetch = 0;
     this._fetchTimer = null;
+    this._fetchInFlight = false;
+    this._fetchQueued = false;
     this._refreshTimer = null;
     this._shellRendered = false;
     this._isMobile = false;
@@ -26,6 +28,7 @@ class RltechFttrStationTableCard extends HTMLElement {
     this._entryResolving = null;
     this._resolvedEntryId = "";
     this._preferencesLoadedKey = "";
+    this._activeDialog = null;
   }
 
   setConfig(config) {
@@ -34,6 +37,7 @@ class RltechFttrStationTableCard extends HTMLElement {
       mobile_page_size: 10,
       page_size_options: [25, 50, 100],
       remember_preferences: true,
+      refresh_interval_ms: 60000,
       search_debounce_ms: 150,
       columns: this._defaultColumns(),
       mobile_columns: this._defaultMobileColumns(),
@@ -50,8 +54,11 @@ class RltechFttrStationTableCard extends HTMLElement {
   }
 
   set hass(hass) {
+    const firstUpdate = !this._hass;
     this._hass = hass;
-    this._scheduleFetch();
+    if (firstUpdate || Date.now() - this._lastFetch >= this._autoRefreshMs()) {
+      this._scheduleFetch(firstUpdate);
+    }
   }
 
   getCardSize() {
@@ -63,6 +70,18 @@ class RltechFttrStationTableCard extends HTMLElement {
       columns: "full",
       min_columns: 4,
     };
+  }
+
+  disconnectedCallback() {
+    this._closeDialog();
+    if (this._fetchTimer) {
+      window.clearTimeout(this._fetchTimer);
+      this._fetchTimer = null;
+    }
+    if (this._refreshTimer) {
+      window.clearTimeout(this._refreshTimer);
+      this._refreshTimer = null;
+    }
   }
 
   static getStubConfig() {
@@ -293,6 +312,12 @@ class RltechFttrStationTableCard extends HTMLElement {
     if (!this._hass) {
       return;
     }
+    if (this._fetchInFlight) {
+      if (immediate) {
+        this._fetchQueued = true;
+      }
+      return;
+    }
     const wait = immediate ? 0 : Math.max(0, 5000 - (Date.now() - this._lastFetch));
     if (this._fetchTimer) {
       if (immediate) {
@@ -312,11 +337,14 @@ class RltechFttrStationTableCard extends HTMLElement {
     if (!this._hass) {
       return;
     }
-    this._lastFetch = Date.now();
+    if (this._fetchInFlight) {
+      this._fetchQueued = true;
+      return;
+    }
+    this._fetchInFlight = true;
     try {
       const entryId = await this._entryId();
       if (!entryId) {
-        this._refreshTable();
         return;
       }
       const result = await this._hass.callWS({
@@ -340,8 +368,20 @@ class RltechFttrStationTableCard extends HTMLElement {
       this._refreshPageSize();
     } catch (err) {
       this._error = err.message || String(err);
+    } finally {
+      this._lastFetch = Date.now();
+      this._fetchInFlight = false;
+      this._refreshTable();
+      if (this._fetchQueued) {
+        this._fetchQueued = false;
+        this._scheduleFetch(true);
+      }
     }
-    this._refreshTable();
+  }
+
+  _autoRefreshMs() {
+    const configured = Number(this._config?.refresh_interval_ms);
+    return Number.isFinite(configured) && configured >= 10000 ? configured : 60000;
   }
 
   async _entryId() {
@@ -466,29 +506,6 @@ class RltechFttrStationTableCard extends HTMLElement {
             <button id="next" type="button">Next</button>
           </div>
         </div>
-        <div id="dialog" class="dialog" hidden>
-          <div class="dialog-card">
-            <div class="dialog-head">
-              <strong id="dialog-title"></strong>
-              <button id="dialog-close" type="button">Close</button>
-            </div>
-            <div id="dialog-body" class="details"></div>
-          </div>
-        </div>
-        <div id="options-dialog" class="dialog" hidden>
-          <div class="dialog-card options-dialog-card">
-            <div class="dialog-head">
-              <strong>Table options</strong>
-              <button id="options-close" type="button">Close</button>
-            </div>
-            <div class="menu-title">Columns</div>
-            <div id="column-panel" class="column-panel"></div>
-            <div class="menu-title">View</div>
-            <div class="dialog-actions">
-              <button id="reset" class="menu-button" type="button">Reset view</button>
-            </div>
-          </div>
-        </div>
       </ha-card>
       <style>
         :host {
@@ -564,33 +581,6 @@ class RltechFttrStationTableCard extends HTMLElement {
           height: 2px;
           width: 16px;
         }
-        .menu-title {
-          color: var(--secondary-text-color);
-          font-size: 12px;
-          font-weight: 650;
-          margin: 4px 0 6px;
-          text-transform: uppercase;
-        }
-        .column-panel {
-          display: grid;
-          gap: 6px;
-        }
-        .column-panel label {
-          align-items: center;
-          display: flex;
-          font-size: 13px;
-          gap: 8px;
-          line-height: 1.3;
-          min-height: 28px;
-          white-space: nowrap;
-        }
-        .column-panel input[type="checkbox"] {
-          flex: 0 0 auto;
-          height: 16px;
-          margin: 0;
-          width: 16px;
-        }
-        .menu-button { width: 100%; }
         .table-wrap {
           overflow-x: auto;
           overflow-y: visible;
@@ -665,51 +655,8 @@ class RltechFttrStationTableCard extends HTMLElement {
           gap: 8px;
           margin-top: 8px;
         }
-        .dialog {
-          background: rgba(0, 0, 0, 0.35);
-          inset: 0;
-          position: fixed;
-          z-index: 10;
-        }
-        .dialog-card {
-          background: var(--card-background-color);
-          border-radius: 8px;
-          box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
-          margin: 8vh auto;
-          max-height: 80vh;
-          max-width: 720px;
-          overflow: auto;
-          padding: 16px;
-        }
-        .options-dialog-card {
-          max-width: 420px;
-        }
-        .dialog-head {
-          align-items: center;
-          display: flex;
-          gap: 12px;
-          justify-content: space-between;
-          margin-bottom: 12px;
-        }
-        .details {
-          display: grid;
-          gap: 6px 14px;
-          grid-template-columns: minmax(120px, max-content) 1fr;
-        }
-        .details div:nth-child(odd) {
-          color: var(--secondary-text-color);
-        }
-        .dialog-actions {
-          margin-top: 10px;
-        }
         @media (max-width: 760px) {
           .wrap { padding: 10px; }
-          .dialog-card {
-            box-sizing: border-box;
-            margin: 4vh 10px;
-            max-width: none;
-            width: calc(100vw - 20px);
-          }
           .toolbar input,
           .toolbar select {
             flex: 1 1 calc(50% - 8px);
@@ -722,21 +669,8 @@ class RltechFttrStationTableCard extends HTMLElement {
             justify-content: center;
           }
           .options { position: static; }
-          .column-panel {
-            gap: 10px;
-            grid-template-columns: 1fr;
-          }
-          .column-panel label {
-            font-size: 15px;
-            min-height: 28px;
-          }
-          .column-panel input[type="checkbox"] {
-            height: 20px;
-            width: 20px;
-          }
           .table-wrap { display: none; }
           .mobile-list { display: block; }
-          .details { grid-template-columns: 1fr; }
         }
       </style>
     `;
@@ -759,13 +693,6 @@ class RltechFttrStationTableCard extends HTMLElement {
       event.stopPropagation();
       this._toggleOptions();
     });
-    this.shadowRoot.getElementById("options-dialog").addEventListener("click", (event) => {
-      if (event.target.id === "options-dialog") {
-        this._closeOptions();
-      }
-    });
-    this.shadowRoot.getElementById("options-close").addEventListener("click", () => this._closeOptions());
-    this.shadowRoot.getElementById("reset").addEventListener("click", () => this._resetPreferences());
     this.shadowRoot.getElementById("page-size").addEventListener("change", (event) => {
       this._setActivePageSize(Number(event.target.value));
       this._page = 0;
@@ -795,9 +722,6 @@ class RltechFttrStationTableCard extends HTMLElement {
     this.shadowRoot.getElementById("next").addEventListener("click", () => {
       this._page += 1;
       this._scheduleFetch(true);
-    });
-    this.shadowRoot.getElementById("dialog-close").addEventListener("click", () => {
-      this.shadowRoot.getElementById("dialog").hidden = true;
     });
     this._refreshPageSize();
     this._renderHeaders();
@@ -837,7 +761,10 @@ class RltechFttrStationTableCard extends HTMLElement {
   }
 
   _refreshColumnPicker() {
-    const panel = this.shadowRoot.getElementById("column-panel");
+    const panel = this._activeDialog?.querySelector("[data-column-panel]");
+    if (!panel) {
+      return;
+    }
     const selected = this._activeColumns();
     panel.innerHTML = this._columnDefs()
       .map((col) => `
@@ -951,12 +878,11 @@ class RltechFttrStationTableCard extends HTMLElement {
     if (!row) {
       return;
     }
-    this.shadowRoot.getElementById("dialog-title").textContent = row.mac || "Station details";
-    this.shadowRoot.getElementById("dialog-body").innerHTML = this._columnDefs()
+    const body = this._columnDefs()
       .filter((col) => col.key !== "details")
       .map((col) => `<div>${this._escape(col.label)}</div><div>${col.render(row)}</div>`)
       .join("");
-    this.shadowRoot.getElementById("dialog").hidden = false;
+    this._showDialog(row.mac || "Station details", `<div class="details">${body}</div>`);
   }
 
   _clearFilters() {
@@ -974,13 +900,149 @@ class RltechFttrStationTableCard extends HTMLElement {
   }
 
   _toggleOptions() {
-    this.shadowRoot.getElementById("options-dialog").hidden = false;
+    this._showDialog(
+      "Table options",
+      `
+        <div class="menu-title">Columns</div>
+        <div data-column-panel class="column-panel"></div>
+        <div class="menu-title">View</div>
+        <div class="dialog-actions">
+          <button data-reset class="menu-button" type="button">Reset view</button>
+        </div>`,
+      { kind: "options", maxWidth: 420 },
+    );
+    this._activeDialog.querySelector("[data-reset]").addEventListener("click", () => this._resetPreferences());
+    this._refreshColumnPicker();
   }
 
   _closeOptions() {
-    const dialog = this.shadowRoot.getElementById("options-dialog");
-    if (dialog) {
-      dialog.hidden = true;
+    if (this._activeDialog?.dataset.kind === "options") {
+      this._closeDialog();
+    }
+  }
+
+  _showDialog(title, body, options = {}) {
+    this._closeDialog();
+    const overlay = document.createElement("div");
+    overlay.className = "rltech-fttr-dialog";
+    overlay.dataset.kind = options.kind || "details";
+    overlay.innerHTML = `
+      <style>
+        .rltech-fttr-dialog {
+          align-items: flex-start;
+          background: rgba(0, 0, 0, 0.35);
+          box-sizing: border-box;
+          display: flex;
+          inset: 0;
+          justify-content: center;
+          padding: 8vh 10px 16px;
+          position: fixed;
+          z-index: 2147483647;
+        }
+        .rltech-fttr-dialog-card {
+          background: var(--card-background-color, #fff);
+          border-radius: 8px;
+          box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+          box-sizing: border-box;
+          color: var(--primary-text-color, #111);
+          max-height: 80vh;
+          max-width: ${Number(options.maxWidth) || 720}px;
+          overflow: auto;
+          padding: 16px;
+          width: min(100%, ${Number(options.maxWidth) || 720}px);
+        }
+        .dialog-head {
+          align-items: center;
+          display: flex;
+          gap: 12px;
+          justify-content: space-between;
+          margin-bottom: 12px;
+        }
+        .details {
+          display: grid;
+          gap: 6px 14px;
+          grid-template-columns: minmax(120px, max-content) 1fr;
+        }
+        .details div:nth-child(odd),
+        .menu-title {
+          color: var(--secondary-text-color, #666);
+        }
+        .menu-title {
+          font-size: 12px;
+          font-weight: 650;
+          margin: 4px 0 6px;
+          text-transform: uppercase;
+        }
+        .column-panel {
+          display: grid;
+          gap: 6px;
+        }
+        .column-panel label {
+          align-items: center;
+          display: flex;
+          font-size: 13px;
+          gap: 8px;
+          line-height: 1.3;
+          min-height: 28px;
+          white-space: nowrap;
+        }
+        .column-panel input[type="checkbox"] {
+          flex: 0 0 auto;
+          height: 16px;
+          margin: 0;
+          width: 16px;
+        }
+        .dialog-actions {
+          margin-top: 10px;
+        }
+        .menu-button {
+          width: 100%;
+        }
+        @media (max-width: 760px) {
+          .rltech-fttr-dialog {
+            padding-top: 4vh;
+          }
+          .rltech-fttr-dialog-card {
+            max-height: 88vh;
+            max-width: none;
+            width: calc(100vw - 20px);
+          }
+          .details {
+            grid-template-columns: 1fr;
+          }
+          .column-panel {
+            gap: 10px;
+          }
+          .column-panel label {
+            font-size: 15px;
+          }
+          .column-panel input[type="checkbox"] {
+            height: 20px;
+            width: 20px;
+          }
+        }
+      </style>
+      <div class="rltech-fttr-dialog-card" role="dialog" aria-modal="true">
+        <div class="dialog-head">
+          <strong>${this._escape(title)}</strong>
+          <button data-close type="button">Close</button>
+        </div>
+        ${body}
+      </div>`;
+    overlay.addEventListener("click", (event) => {
+      if (event.target === overlay) {
+        this._closeDialog();
+      }
+    });
+    overlay.querySelector("[data-close]").addEventListener("click", () => this._closeDialog());
+    document.body.appendChild(overlay);
+    this._activeDialog = overlay;
+  }
+
+  _closeDialog() {
+    if (this._activeDialog) {
+      this._activeDialog.remove();
+      this._activeDialog = null;
     }
   }
 
