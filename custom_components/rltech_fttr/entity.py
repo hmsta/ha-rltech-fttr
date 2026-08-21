@@ -45,7 +45,7 @@ def controller_device_info(
     return DeviceInfo(
         identifiers={(DOMAIN, entry.entry_id)},
         manufacturer=status.manufacturer if status and status.manufacturer else "RLTech",
-        name=f"RLTech FTTR {_base_url_to_host(base_url)}",
+        name=f"RLTech OLT {_base_url_to_host(base_url)}",
         model=status.gateway_type if status else None,
         hw_version=status.hardware_version if status else None,
         sw_version=status.software_version if status else None,
