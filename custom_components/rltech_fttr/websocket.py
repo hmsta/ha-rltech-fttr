@@ -323,29 +323,30 @@ def _ap_registry_info(
 
     entity_registry = er.async_get(hass)
     device_registry = dr.async_get(hass)
+    entity_lookup = {
+        entry.unique_id: entry.entity_id
+        for entry in er.async_entries_for_config_entry(entity_registry, entry_id)
+        if entry.domain == "sensor" and entry.platform == DOMAIN and entry.unique_id
+    }
+    device_lookup: dict[str, str] = {}
+    for device in dr.async_entries_for_config_entry(device_registry, entry_id):
+        for domain, identifier in device.identifiers:
+            if domain == DOMAIN:
+                device_lookup[identifier] = device.id
+
     result: dict[str, dict[str, object]] = {}
     for mac, ap in data.aps.items():
         entities: dict[str, str] = {}
-        device = (
-            device_registry.async_get_device(
-                identifiers={(DOMAIN, f"{entry_id}_ap_{ap.sn}")},
-            )
-            if ap.sn
-            else None
-        )
+        device_identifier = f"{entry_id}_ap_{ap.sn}" if ap.sn else None
         for key in AP_SENSOR_KEYS:
             unique_id = ap_sensor_unique_id(entry_id, ap, key)
             if unique_id is None:
                 continue
-            entity_id = entity_registry.async_get_entity_id(
-                "sensor",
-                DOMAIN,
-                unique_id,
-            )
+            entity_id = entity_lookup.get(unique_id)
             if entity_id:
                 entities[key] = entity_id
         result[mac] = {
-            "device_id": device.id if device else None,
+            "device_id": device_lookup.get(device_identifier) if device_identifier else None,
             "entities": entities,
         }
     return result

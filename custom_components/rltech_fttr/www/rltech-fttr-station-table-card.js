@@ -16,6 +16,7 @@ class RltechFttrStationTableCard extends HTMLElement {
     this._filterOptions = {};
     this._columns = [];
     this._mobileColumns = [];
+    this._columnDefsCache = null;
     this._error = "";
     this._lastFetch = 0;
     this._fetchTimer = null;
@@ -91,7 +92,10 @@ class RltechFttrStationTableCard extends HTMLElement {
   }
 
   _columnDefs() {
-    return [
+    if (this._columnDefsCache) {
+      return this._columnDefsCache;
+    }
+    this._columnDefsCache = [
       ["details", "More", (_row, index) => this._detailsButton(index), () => ""],
       ["mac", "MAC"],
       ["ip", "IP"],
@@ -119,6 +123,7 @@ class RltechFttrStationTableCard extends HTMLElement {
       render: render || ((row) => this._escape(row[key])),
       sort: sort || ((row) => row[key]),
     }));
+    return this._columnDefsCache;
   }
 
   _defaultColumns() {
@@ -811,12 +816,19 @@ class RltechFttrStationTableCard extends HTMLElement {
     this.shadowRoot.getElementById("clear-filters").hidden = !this._hasActiveFilters();
     const defs = new Map(this._columnDefs().map((col) => [col.key, col]));
     const columns = this._activeColumns();
-    this.shadowRoot.getElementById("rows").innerHTML = rows.length
-      ? rows.map((row, index) => `<tr>${columns.map((key) => `<td>${defs.get(key).render(row, index)}</td>`).join("")}</tr>`).join("")
-      : `<tr><td class="empty" colspan="${columns.length || 1}">No matching stations</td></tr>`;
-    this.shadowRoot.getElementById("mobile-rows").innerHTML = rows.length
-      ? rows.map((row, index) => this._mobileRow(row, index, defs, columns)).join("")
-      : `<div class="empty">No matching stations</div>`;
+    const desktopRows = this.shadowRoot.getElementById("rows");
+    const mobileRows = this.shadowRoot.getElementById("mobile-rows");
+    if (this._isMobile) {
+      desktopRows.innerHTML = "";
+      mobileRows.innerHTML = rows.length
+        ? rows.map((row, index) => this._mobileRow(row, index, defs, columns)).join("")
+        : `<div class="empty">No matching stations</div>`;
+    } else {
+      mobileRows.innerHTML = "";
+      desktopRows.innerHTML = rows.length
+        ? rows.map((row, index) => `<tr>${columns.map((key) => `<td>${defs.get(key).render(row, index)}</td>`).join("")}</tr>`).join("")
+        : `<tr><td class="empty" colspan="${columns.length || 1}">No matching stations</td></tr>`;
+    }
     for (const button of this.shadowRoot.querySelectorAll("button[data-details]")) {
       button.addEventListener("click", () => this._showDetails(rows[Number(button.dataset.details)]));
     }

@@ -16,6 +16,7 @@ class RltechFttrApTableCard extends HTMLElement {
     this._filterOptions = {};
     this._columns = [];
     this._mobileColumns = [];
+    this._columnDefsCache = null;
     this._error = "";
     this._lastFetch = 0;
     this._fetchTimer = null;
@@ -95,7 +96,10 @@ class RltechFttrApTableCard extends HTMLElement {
   }
 
   _columnDefs() {
-    return [
+    if (this._columnDefsCache) {
+      return this._columnDefsCache;
+    }
+    this._columnDefsCache = [
       ["details", "More", (_row, index) => this._detailsButton(index), () => ""],
       ["alias", "Alias", (row) => this._escape(row.alias || row.mac), (row) => row.alias || row.mac],
       ["mac", "MAC"],
@@ -148,6 +152,7 @@ class RltechFttrApTableCard extends HTMLElement {
       sort: sort || ((row) => row[key]),
       entityKey,
     }));
+    return this._columnDefsCache;
   }
 
   _defaultColumns() {
@@ -858,12 +863,19 @@ class RltechFttrApTableCard extends HTMLElement {
     this.shadowRoot.getElementById("clear-filters").hidden = !this._hasActiveFilters();
     const defs = new Map(this._columnDefs().map((col) => [col.key, col]));
     const columns = this._activeColumns();
-    this.shadowRoot.getElementById("rows").innerHTML = rows.length
-      ? rows.map((row, index) => `<tr>${columns.map((key) => `<td>${this._renderCell(row, defs.get(key), index)}</td>`).join("")}</tr>`).join("")
-      : `<tr><td class="empty" colspan="${columns.length || 1}">No matching access points</td></tr>`;
-    this.shadowRoot.getElementById("mobile-rows").innerHTML = rows.length
-      ? rows.map((row, index) => this._mobileRow(row, index, defs, columns)).join("")
-      : `<div class="empty">No matching access points</div>`;
+    const desktopRows = this.shadowRoot.getElementById("rows");
+    const mobileRows = this.shadowRoot.getElementById("mobile-rows");
+    if (this._isMobile) {
+      desktopRows.innerHTML = "";
+      mobileRows.innerHTML = rows.length
+        ? rows.map((row, index) => this._mobileRow(row, index, defs, columns)).join("")
+        : `<div class="empty">No matching access points</div>`;
+    } else {
+      mobileRows.innerHTML = "";
+      desktopRows.innerHTML = rows.length
+        ? rows.map((row, index) => `<tr>${columns.map((key) => `<td>${this._renderCell(row, defs.get(key), index)}</td>`).join("")}</tr>`).join("")
+        : `<tr><td class="empty" colspan="${columns.length || 1}">No matching access points</td></tr>`;
+    }
     for (const button of this.shadowRoot.querySelectorAll("button[data-details]")) {
       button.addEventListener("click", () => this._showDetails(rows[Number(button.dataset.details)]));
     }
