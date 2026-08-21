@@ -938,6 +938,11 @@ def normalize_snapshot(
 
     olt_status = parse_olt_status(olt_html, now=now) if olt_html is not None else None
 
+    if ap_details is None and previous is not None:
+        ap_details = {
+            mac: detail for mac, detail in previous.ap_details.items() if mac in aps
+        }
+
     return RltechData(
         aps=aps,
         ap_details=ap_details or {},
@@ -958,9 +963,10 @@ def _join_legacy_ap_details(
     now: datetime,
 ) -> dict[str, RltechApDetail]:
     """Join legacy ONU rows to managed APs by AP serial."""
+    previous_details = previous.ap_details if previous is not None else {}
     joined = {
         mac: detail
-        for mac, detail in (previous.ap_details if previous is not None else {}).items()
+        for mac, detail in previous_details.items()
         if mac in aps
     }
     for mac, ap in aps.items():
@@ -970,6 +976,7 @@ def _join_legacy_ap_details(
         detail = details_by_sn.get(sn)
         if detail is None:
             continue
+        old = previous_details.get(mac)
         joined[mac] = replace(
             detail,
             mac=mac,
@@ -985,6 +992,12 @@ def _join_legacy_ap_details(
             uplink_port=ap.uplink_port,
             assoc_count=ap.assoc_count,
             last_update=now,
+            sys_duration=old.sys_duration if old else detail.sys_duration,
+            last_boot=old.last_boot if old else detail.last_boot,
+            cpu_usage=old.cpu_usage if old else detail.cpu_usage,
+            cpu_temperature=old.cpu_temperature if old else detail.cpu_temperature,
+            memory_usage=old.memory_usage if old else detail.memory_usage,
+            flash_usage=old.flash_usage if old else detail.flash_usage,
         )
     return joined
 

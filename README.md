@@ -2,10 +2,14 @@
 
 Custom integration for RLTech OLT/FTTR Web UI inventory data.
 
+Requires Home Assistant `2026.3.0` or newer.
+
 The integration reads two RLTech Web UI planes:
 
 - Port `8080` for FTTR AP and Wi-Fi station inventory.
 - Port `80` for OLT hardware, LAN/LAN-PON, and ONU optical status.
+- Optional local MQTT on port `8883` for faster station and AP health updates
+  between HTTP polls.
 
 The integration logs out immediately after each poll so Web UI sessions are not
 kept open.
@@ -65,6 +69,10 @@ Add the integration from the Home Assistant UI. Required fields:
 - AP inventory polling, enabled by default
 - Station inventory polling, enabled by default
 - Hardware and ONU status polling, enabled by default
+- MQTT live overlay, disabled by default. When enabled, configure the local
+  MQTT host, port, username, password, PSK identity, and hex PSK. The MQTT
+  connection is owned by this integration and does not require Home Assistant's
+  MQTT integration.
 - Area for AP devices, optional. When set, newly created AP devices are assigned
   to this area if they do not already have an area.
 
@@ -94,6 +102,32 @@ When FTTR station hostnames are missing or junk values such as `N/A`, the
 coordinator can enrich the in-memory station rows from Home Assistant's DHCP
 discovery cache. This is a once-per-poll map lookup by normalized MAC address
 and IP address; it does not create station entities or persist station data.
+
+When MQTT live overlay is enabled, MQTT station updates also reuse this backend
+hostname enrichment. If a hostname is not known when a station first appears,
+the integration retries enrichment later so DHCP data that arrives after the
+station update can still fill the table row.
+
+## MQTT live overlay
+
+MQTT is optional and complements HTTP polling; it does not replace it.
+
+- HTTP remains the authority for AP inventory, station baseline, OLT status,
+  LAN/LAN-PON status, and ONU optical TX/RX.
+- MQTT subscribes only to the local AP notification topic and parses station
+  updates plus known-AP health heartbeats.
+- MQTT station updates refresh the in-memory station table data between HTTP
+  polls, without creating station entities.
+- MQTT AP health updates are applied only to APs already discovered by HTTP.
+  Unknown AP heartbeats are ignored.
+- MQTT can update AP associated-client count, CPU usage, CPU temperature,
+  memory usage, flash usage, and AP last boot.
+- The Lovelace cards remain pull-based. MQTT updates do not force the cards to
+  refetch or redraw on every message.
+
+If MQTT is unavailable or misconfigured, the integration continues to work with
+HTTP polling only. MQTT passwords, PSKs, and raw payloads are not exposed in
+diagnostics.
 
 ## Station table card
 

@@ -53,6 +53,7 @@ class RltechApDetail:
     bssid_5: str | None = None
     hostname: str | None = None
     sys_duration: int | None = None
+    last_boot: datetime | None = None
     ram_size: int | None = None
     flash_size: int | None = None
     cpu_usage: float | None = None

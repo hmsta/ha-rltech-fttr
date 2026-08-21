@@ -28,7 +28,9 @@ from .const import (
     CONF_AP_AREA_ID,
     CONF_BASE_URL,
     CONF_ENABLE_HARDWARE_STATUS,
+    CONF_ENABLE_MQTT,
     DEFAULT_ENABLE_HARDWARE_STATUS,
+    DEFAULT_ENABLE_MQTT,
     DOMAIN,
 )
 from .coordinator import RltechCoordinator
@@ -235,7 +237,60 @@ AP_DETAIL_SENSORS = (
         entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=lambda detail: detail.source_host,
     ),
+    ApDetailSensorDescription(
+        key="cpu_usage",
+        translation_key="cpu_usage",
+        icon="mdi:cpu-64-bit",
+        native_unit_of_measurement="%",
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda detail: detail.cpu_usage,
+    ),
+    ApDetailSensorDescription(
+        key="cpu_temperature",
+        translation_key="cpu_temperature",
+        icon="mdi:thermometer",
+        native_unit_of_measurement="°C",
+        device_class=SensorDeviceClass.TEMPERATURE,
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda detail: detail.cpu_temperature,
+    ),
+    ApDetailSensorDescription(
+        key="memory_usage",
+        translation_key="memory_usage",
+        icon="mdi:memory",
+        native_unit_of_measurement="%",
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda detail: detail.memory_usage,
+    ),
+    ApDetailSensorDescription(
+        key="flash_usage",
+        translation_key="flash_usage",
+        icon="mdi:harddisk",
+        native_unit_of_measurement="%",
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda detail: detail.flash_usage,
+    ),
+    ApDetailSensorDescription(
+        key="last_boot",
+        translation_key="last_boot",
+        icon="mdi:restart",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda detail: detail.last_boot,
+    ),
 )
+
+MQTT_AP_DETAIL_KEYS = {
+    "cpu_usage",
+    "cpu_temperature",
+    "memory_usage",
+    "flash_usage",
+    "last_boot",
+}
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -370,6 +425,8 @@ SENSOR_NAMES = {
     "reg_off_time": "Reg/Off Time",
     "last_down_cause": "Last off reason",
     "source_host": "Source host",
+    "cpu_temperature": "CPU temperature",
+    "flash_usage": "Flash usage",
 }
 
 
@@ -388,6 +445,13 @@ async def async_setup_entry(
     hardware_status_enabled = entry.data.get(
         CONF_ENABLE_HARDWARE_STATUS,
         entry.data.get("enable_olt_status", DEFAULT_ENABLE_HARDWARE_STATUS),
+    )
+    mqtt_enabled = entry.data.get(CONF_ENABLE_MQTT, DEFAULT_ENABLE_MQTT)
+    ap_detail_sensors = tuple(
+        description
+        for description in AP_DETAIL_SENSORS
+        if hardware_status_enabled
+        or (mqtt_enabled and description.key in MQTT_AP_DETAIL_KEYS)
     )
     if hardware_status_enabled:
         entities.extend(
@@ -421,10 +485,10 @@ async def async_setup_entry(
                 RltechApSensor(entry, coordinator, mac, description)
                 for description in AP_SENSORS
             )
-            if hardware_status_enabled:
+            if ap_detail_sensors:
                 new_entities.extend(
                     RltechApDetailSensor(entry, coordinator, mac, description)
-                    for description in AP_DETAIL_SENSORS
+                    for description in ap_detail_sensors
                 )
         if hardware_status_enabled:
             for port in coordinator.data.lan_ports:

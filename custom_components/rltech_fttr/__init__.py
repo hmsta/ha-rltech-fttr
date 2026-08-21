@@ -145,6 +145,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    await coordinator.async_start_mqtt()
     return True
 
 
@@ -152,6 +153,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload an RLTech FTTR config entry."""
     coordinator: RltechCoordinator = hass.data[DOMAIN][entry.entry_id]
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    with contextlib.suppress(Exception):
+        await coordinator.async_stop_mqtt()
     with contextlib.suppress(Exception):
         await coordinator.client.logout(async_get_clientsession(hass))
     if unload_ok:

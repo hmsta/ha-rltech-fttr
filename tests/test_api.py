@@ -30,6 +30,7 @@ ap_inventory = load_module("ap_inventory")
 dhcp_enrichment = load_module("dhcp_enrichment")
 hostname_enrichment = load_module("hostname_enrichment")
 station_inventory = load_module("station_inventory")
+mqtt = load_module("mqtt")
 
 
 def payload(rows, total=None, code=0):
@@ -299,6 +300,333 @@ def test_dhcp_enrichment_does_not_replace_useful_fttr_hostname() -> None:
     assert enriched.stations["7C:45:D0:4C:17:59"].hostname == "fttr-phone"
 
 
+def test_mqtt_station_update_merges_into_station_inventory() -> None:
+    now = datetime(2026, 8, 21, 12, 0, tzinfo=UTC)
+    data = models.RltechData(
+        aps={
+            "44:95:3B:B8:DC:D0": models.RltechAp(
+                mac="44:95:3B:B8:DC:D0",
+                alias="House53_Living",
+                sn="RLGM3BB8DCD0",
+            )
+        }
+    )
+    cmd, update = mqtt.parse_mqtt_payload(
+        json.dumps(
+            {
+                "Cmd": "XReport_StaList",
+                "Data": {
+                    "List": [
+                        {
+                            "Mac": "7C45D04C1759",
+                            "APMac": "44953BB8DCD0",
+                            "IP": "192.168.43.223",
+                            "SSID": "wondervillage",
+                            "RSSI": "-65",
+                            "Bandwidth": "4",
+                            "Channel": "40",
+                            "Vlan": "40",
+                            "RxRate": "1",
+                            "TxRate": "2",
+                            "RxNegoRate": "585",
+                            "TxNegoRate": "864",
+                            "UpTime": "5457",
+                            "Status": "1",
+                        }
+                    ]
+                },
+            }
+        )
+    )
+
+    assert cmd == "XReport_StaList"
+    merged = mqtt.merge_station_updates(data, update, now=now)
+    station = merged.stations["7C:45:D0:4C:17:59"]
+    assert station.ap_alias == "House53_Living"
+    assert station.band == "5 GHz"
+    assert station.bandwidth == "20/40/80 MHz"
+    assert station.last_seen == now
+    assert station.reported_online is True
+
+
+def test_mqtt_station_update_preserves_existing_hostname() -> None:
+    now = datetime(2026, 8, 21, 12, 0, tzinfo=UTC)
+    previous = models.RltechStation(
+        mac="7C:45:D0:4C:17:59",
+        reported_online=True,
+        home=True,
+        last_seen=now,
+        hostname="dhcp-phone",
+    )
+    data = models.RltechData(stations={previous.mac: previous})
+    update = [
+        mqtt.MqttStationUpdate(
+            mac=previous.mac,
+            ip="192.168.43.223",
+            hostname=None,
+            reported_online=True,
+        )
+    ]
+
+    merged = mqtt.merge_station_updates(data, update, now=now + timedelta(seconds=5))
+
+    assert merged.stations[previous.mac].hostname == "dhcp-phone"
+
+
+def test_mqtt_ap_health_updates_known_ap_only_and_stabilizes_boot_time() -> None:
+    now = datetime(2026, 8, 21, 12, 0, tzinfo=UTC)
+    ap = models.RltechAp(
+        mac="44:95:3B:B8:DC:D0",
+        sn="RLGM3BB8DCD0",
+        assoc_count=1,
+    )
+    previous_boot = now - timedelta(seconds=100)
+    data = models.RltechData(
+        aps={ap.mac: ap},
+        ap_details={
+            ap.mac: models.RltechApDetail(
+                mac=ap.mac,
+                last_boot=previous_boot,
+                cpu_usage=5,
+            )
+        },
+    )
+    cmd, update = mqtt.parse_mqtt_payload(
+        json.dumps(
+            {
+                "Cmd": "XReport_ExtendInfo",
+                "Send": "44953BB8DCD0",
+                "Data": {
+                    "PONSN": "RLGM3BB8DCD0",
+                    "Assoc": "12",
+                    "CPUUsage": "8",
+                    "CPUTemp": "66",
+                    "MEMUsage": "30",
+                    "FlashUsage": "86",
+                    "SysDuration": "101",
+                },
+            }
+        )
+    )
+
+    assert cmd == "XReport_ExtendInfo"
+    merged = mqtt.merge_ap_health_update(data, update, now=now)
+    detail = merged.ap_details[ap.mac]
+    assert merged.aps[ap.mac].assoc_count == 12
+    assert detail.cpu_usage == 8
+    assert detail.cpu_temperature == 66
+    assert detail.memory_usage == 30
+    assert detail.flash_usage == 86
+    assert detail.last_boot == previous_boot
+
+    unknown = mqtt.MqttApHealthUpdate(mac="44:95:3B:B8:FF:FF", assoc_count=99)
+    assert mqtt.merge_ap_health_update(data, unknown, now=now) is data
+
+
+def test_mqtt_live_overlay_preserves_newer_station_update() -> None:
+    fresh_time = datetime(2026, 8, 21, 12, 0, tzinfo=UTC)
+    current_time = fresh_time + timedelta(seconds=10)
+    mac = "7C:45:D0:4C:17:59"
+    fresh = models.RltechData(
+        stations={
+            mac: models.RltechStation(
+                mac=mac,
+                reported_online=True,
+                home=True,
+                last_seen=fresh_time,
+                ip="192.168.43.10",
+                hostname=None,
+                rssi=-80,
+            )
+        }
+    )
+    current = models.RltechData(
+        stations={
+            mac: models.RltechStation(
+                mac=mac,
+                reported_online=True,
+                home=True,
+                last_seen=current_time,
+                ip="192.168.43.10",
+                hostname="dhcp-phone",
+                rssi=-55,
+            )
+        }
+    )
+
+    merged = mqtt.preserve_live_overlay(current, fresh)
+
+    assert merged.stations[mac].last_seen == current_time
+    assert merged.stations[mac].hostname == "dhcp-phone"
+    assert merged.stations[mac].rssi == -55
+
+
+def test_mqtt_live_overlay_keeps_http_station_when_newer() -> None:
+    fresh_time = datetime(2026, 8, 21, 12, 0, tzinfo=UTC)
+    current_time = fresh_time - timedelta(seconds=10)
+    mac = "7C:45:D0:4C:17:59"
+    fresh = models.RltechData(
+        stations={
+            mac: models.RltechStation(
+                mac=mac,
+                reported_online=True,
+                home=True,
+                last_seen=fresh_time,
+                hostname=None,
+                rssi=-55,
+            )
+        }
+    )
+    current = models.RltechData(
+        stations={
+            mac: models.RltechStation(
+                mac=mac,
+                reported_online=True,
+                home=True,
+                last_seen=current_time,
+                hostname="dhcp-phone",
+                rssi=-80,
+            )
+        }
+    )
+
+    merged = mqtt.preserve_live_overlay(current, fresh)
+
+    assert merged.stations[mac].last_seen == fresh_time
+    assert merged.stations[mac].hostname == "dhcp-phone"
+    assert merged.stations[mac].rssi == -55
+
+
+def test_mqtt_live_overlay_preserves_ap_health_without_overwriting_optics() -> None:
+    now = datetime(2026, 8, 21, 12, 0, tzinfo=UTC)
+    mac = "44:95:3B:B8:DC:D0"
+    ap = models.RltechAp(mac=mac, sn="RLGM3BB8DCD0", assoc_count=1)
+    fresh = models.RltechData(
+        aps={mac: ap},
+        ap_details={
+            mac: models.RltechApDetail(
+                mac=mac,
+                optical_tx_power=-1.79,
+                optical_rx_power=-15.46,
+                last_update=now,
+            )
+        },
+    )
+    current = models.RltechData(
+        aps={mac: models.RltechAp(mac=mac, sn="RLGM3BB8DCD0", assoc_count=12)},
+        ap_details={
+            mac: models.RltechApDetail(
+                mac=mac,
+                cpu_usage=8,
+                cpu_temperature=66,
+                memory_usage=30,
+                flash_usage=86,
+                sys_duration=3600,
+                last_boot=now - timedelta(hours=1),
+                last_update=now - timedelta(seconds=5),
+            )
+        },
+    )
+
+    merged = mqtt.preserve_live_overlay(current, fresh)
+    detail = merged.ap_details[mac]
+
+    assert merged.aps[mac].assoc_count == 12
+    assert detail.optical_tx_power == -1.79
+    assert detail.optical_rx_power == -15.46
+    assert detail.cpu_usage == 8
+    assert detail.cpu_temperature == 66
+    assert detail.memory_usage == 30
+    assert detail.flash_usage == 86
+    assert detail.sys_duration == 3600
+
+
+def test_mqtt_live_overlay_only_preserves_ap_assoc_changed_during_poll() -> None:
+    mac = "44:95:3B:B8:DC:D0"
+    previous = models.RltechData(
+        aps={mac: models.RltechAp(mac=mac, sn="RLGM3BB8DCD0", assoc_count=12)}
+    )
+    current_unchanged = models.RltechData(
+        aps={mac: models.RltechAp(mac=mac, sn="RLGM3BB8DCD0", assoc_count=12)}
+    )
+    current_changed = models.RltechData(
+        aps={mac: models.RltechAp(mac=mac, sn="RLGM3BB8DCD0", assoc_count=13)}
+    )
+    fresh = models.RltechData(
+        aps={mac: models.RltechAp(mac=mac, sn="RLGM3BB8DCD0", assoc_count=9)}
+    )
+
+    stale_merged = mqtt.preserve_live_overlay(current_unchanged, fresh, previous)
+    changed_merged = mqtt.preserve_live_overlay(current_changed, fresh, previous)
+
+    assert stale_merged.aps[mac].assoc_count == 9
+    assert changed_merged.aps[mac].assoc_count == 13
+
+
+def test_mqtt_packet_reader_handles_publish_ping_and_disconnect() -> None:
+    async def run() -> None:
+        client = mqtt.AsyncPskMqttClient(
+            "olt",
+            8883,
+            "admin",
+            "123456",
+            psk_identity="admin",
+            psk_hex="61646D696E21402324",
+            client_id="test",
+        )
+        reader = asyncio.StreamReader()
+        reader.feed_data(
+            mqtt._packet(0x30, mqtt._pack_string("topic") + b'{"ok":true}')
+            + mqtt._packet(0xD0, b"")
+            + mqtt._packet(0xE0, b"")
+        )
+        client.reader = reader
+
+        assert await client.read_message() == ("topic", '{"ok":true}')
+        assert await client.read_message() is None
+        try:
+            await client.read_message()
+        except mqtt.RltechMqttError:
+            return
+        raise AssertionError("expected broker disconnected error")
+
+    asyncio.run(run())
+
+
+def test_mqtt_subscribe_accepts_suback() -> None:
+    class FakeWriter:
+        def __init__(self) -> None:
+            self.written = b""
+
+        def write(self, data: bytes) -> None:
+            self.written += data
+
+        async def drain(self) -> None:
+            return None
+
+    async def run() -> None:
+        client = mqtt.AsyncPskMqttClient(
+            "olt",
+            8883,
+            "admin",
+            "123456",
+            psk_identity="admin",
+            psk_hex="61646D696E21402324",
+            client_id="test",
+        )
+        reader = asyncio.StreamReader()
+        reader.feed_data(mqtt._packet(0x90, b"\x00\x01\x00"))
+        client.reader = reader
+        writer = FakeWriter()
+        client.writer = writer
+
+        await client.subscribe(["topic"])
+
+        assert writer.written.startswith(b"\x82")
+
+    asyncio.run(run())
+
+
 def test_dhcp_match_summary_counts_fillable_missing_hostnames() -> None:
     data = api.normalize_snapshot(
         [payload([])],
@@ -530,6 +858,7 @@ def test_parse_legacy_port80_pages() -> None:
 
 def test_legacy_onu_details_join_to_aps_by_serial() -> None:
     now = datetime(2026, 8, 21, 10, 0, 0, tzinfo=UTC)
+    last_boot = datetime(2026, 8, 21, 8, 0, 0, tzinfo=UTC)
     ap = models.RltechAp(
         mac="44:95:3B:B8:DC:E0",
         sn="RLGM3BB8DCE0",
@@ -544,14 +873,70 @@ def test_legacy_onu_details_join_to_aps_by_serial() -> None:
             reg_off_time=datetime(2026, 8, 21, 6, 12, 26, tzinfo=UTC),
         )
     }
+    previous = models.RltechData(
+        aps={ap.mac: ap},
+        ap_details={
+            ap.mac: models.RltechApDetail(
+                mac=ap.mac,
+                sys_duration=7200,
+                last_boot=last_boot,
+                cpu_usage=8,
+                cpu_temperature=66,
+                memory_usage=30,
+                flash_usage=86,
+            )
+        },
+    )
 
-    joined = api._join_legacy_ap_details({ap.mac: ap}, details, None, now=now)
+    joined = api._join_legacy_ap_details({ap.mac: ap}, details, previous, now=now)
 
     assert joined[ap.mac].sn == "RLGM3BB8DCE0"
     assert joined[ap.mac].mac == ap.mac
     assert joined[ap.mac].alias == "House11_Office"
     assert joined[ap.mac].optical_rx_power == -15.46
     assert joined[ap.mac].last_update == now
+    assert joined[ap.mac].sys_duration == 7200
+    assert joined[ap.mac].last_boot == last_boot
+    assert joined[ap.mac].cpu_usage == 8
+    assert joined[ap.mac].cpu_temperature == 66
+    assert joined[ap.mac].memory_usage == 30
+    assert joined[ap.mac].flash_usage == 86
+
+
+def test_normalize_snapshot_preserves_ap_details_when_no_details_polled() -> None:
+    previous = models.RltechData(
+        aps={
+            "44:95:3B:B8:DC:E0": models.RltechAp(
+                mac="44:95:3B:B8:DC:E0",
+                sn="RLGM3BB8DCE0",
+            )
+        },
+        ap_details={
+            "44:95:3B:B8:DC:E0": models.RltechApDetail(
+                mac="44:95:3B:B8:DC:E0",
+                cpu_usage=8,
+            )
+        },
+    )
+
+    data = api.normalize_snapshot(
+        [
+            payload(
+                [
+                    {
+                        "Mac": "44953BB8DCE0",
+                        "SN": "RLGM3BB8DCE0",
+                    }
+                ]
+            )
+        ],
+        [],
+        olt_html=None,
+        previous=previous,
+        ap_details=None,
+    )
+
+    assert data.ap_details["44:95:3B:B8:DC:E0"].cpu_usage == 8
 
 
 def test_legacy_sources_are_preserved_per_olt() -> None:
@@ -874,12 +1259,20 @@ def test_diagnostics_redaction_helper() -> None:
         {
             "password": "secret",
             "username": "admin",
+            "mqtt_password": "mqtt-secret",
+            "mqtt_psk": "abcdef",
+            "mqtt_psk_identity": "admin",
+            "mqtt_host": "172.20.11.1",
             "base_url": "http://192.168.1.1",
             "nested": {"token": "abc", "ok": True, "mac": "aa:bb"},
         }
     )
     assert result["password"] == diagnostics.REDACTED
     assert result["username"] == diagnostics.REDACTED
+    assert result["mqtt_password"] == diagnostics.REDACTED
+    assert result["mqtt_psk"] == diagnostics.REDACTED
+    assert result["mqtt_psk_identity"] == diagnostics.REDACTED
+    assert result["mqtt_host"] == diagnostics.REDACTED
     assert result["base_url"] == diagnostics.REDACTED
     assert result["nested"]["token"] == diagnostics.REDACTED
     assert result["nested"]["mac"] == diagnostics.REDACTED

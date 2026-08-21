@@ -18,6 +18,11 @@ REDACT_KEYS = {
     "legacy_password",
     "ap_username",
     "ap_password",
+    "mqtt_username",
+    "mqtt_password",
+    "mqtt_psk_identity",
+    "mqtt_psk",
+    "mqtt_host",
     "legacy_hosts",
     "base_url",
     "ecnttoken",
@@ -56,6 +61,11 @@ async def async_get_config_entry_diagnostics(
     """Return redacted diagnostics for a config entry."""
     coordinator = hass.data.get(DOMAIN, {}).get(entry.entry_id)
     data = coordinator.data if coordinator is not None else None
+    mqtt_summary = (
+        coordinator.mqtt_stats.as_dict()
+        if coordinator is not None and hasattr(coordinator, "mqtt_stats")
+        else None
+    )
     summary = None
     dhcp_summary = None
     if data is not None:
@@ -138,6 +148,13 @@ async def async_get_config_entry_diagnostics(
                 "enable_ap_polling": entry.data.get("enable_ap_polling"),
                 "enable_station_polling": entry.data.get("enable_station_polling"),
                 "enable_hardware_status": entry.data.get("enable_hardware_status"),
+                "enable_mqtt": entry.data.get("enable_mqtt"),
+                "mqtt_host": entry.data.get("mqtt_host"),
+                "mqtt_port": entry.data.get("mqtt_port"),
+                "mqtt_username": entry.data.get("mqtt_username"),
+                "mqtt_password": entry.data.get("mqtt_password"),
+                "mqtt_psk_identity": entry.data.get("mqtt_psk_identity"),
+                "mqtt_psk": entry.data.get("mqtt_psk"),
                 "legacy_username": entry.data.get("legacy_username"),
                 "legacy_hosts": entry.data.get("legacy_hosts"),
                 "ap_username": entry.data.get("ap_username"),
@@ -146,6 +163,7 @@ async def async_get_config_entry_diagnostics(
                 "ap_password": entry.data.get("ap_password"),
             },
             "summary": summary,
+            "mqtt": mqtt_summary,
             "dhcp_hostname_enrichment": dhcp_summary,
         }
     )

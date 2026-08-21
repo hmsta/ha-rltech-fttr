@@ -16,6 +16,11 @@ AP_SENSOR_KEYS = (
     "reg_off_time",
     "last_down_cause",
     "source_host",
+    "cpu_usage",
+    "cpu_temperature",
+    "memory_usage",
+    "flash_usage",
+    "last_boot",
 )
 
 

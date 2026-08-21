@@ -20,9 +20,16 @@ from .const import (
     CONF_BASE_URL,
     CONF_ENABLE_AP_POLLING,
     CONF_ENABLE_HARDWARE_STATUS,
+    CONF_ENABLE_MQTT,
     CONF_LEGACY_HOSTS,
     CONF_LEGACY_PASSWORD,
     CONF_LEGACY_USERNAME,
+    CONF_MQTT_HOST,
+    CONF_MQTT_PASSWORD,
+    CONF_MQTT_PORT,
+    CONF_MQTT_PSK,
+    CONF_MQTT_PSK_IDENTITY,
+    CONF_MQTT_USERNAME,
     CONF_AP_AREA_ID,
     CONF_SCAN_INTERVAL,
     CONF_ENABLE_STATION_POLLING,
@@ -32,8 +39,13 @@ from .const import (
     DEFAULT_USERNAME,
     DEFAULT_ENABLE_HARDWARE_STATUS,
     DEFAULT_ENABLE_AP_POLLING,
+    DEFAULT_ENABLE_MQTT,
     DEFAULT_LEGACY_PASSWORD,
     DEFAULT_LEGACY_USERNAME,
+    DEFAULT_MQTT_PASSWORD,
+    DEFAULT_MQTT_PORT,
+    DEFAULT_MQTT_PSK_IDENTITY,
+    DEFAULT_MQTT_USERNAME,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_ENABLE_STATION_POLLING,
     DEFAULT_STATION_RETENTION,
@@ -72,6 +84,13 @@ def _host_to_base_url(value: str) -> str:
     else:
         host = text
     return f"http://{host}:8080"
+
+
+def _mqtt_host_default(defaults: dict[str, Any]) -> str:
+    """Return the MQTT host form default."""
+    return defaults.get(CONF_MQTT_HOST) or _base_url_to_host(
+        defaults.get(CONF_BASE_URL, DEFAULT_BASE_URL)
+    )
 
 
 def _schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
@@ -135,6 +154,25 @@ def _schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
                 ),
             ): bool,
             vol.Optional(
+                CONF_ENABLE_MQTT,
+                default=defaults.get(CONF_ENABLE_MQTT, DEFAULT_ENABLE_MQTT),
+            ): bool,
+            vol.Optional(CONF_MQTT_HOST, default=_mqtt_host_default(defaults)): str,
+            vol.Optional(
+                CONF_MQTT_PORT,
+                default=defaults.get(CONF_MQTT_PORT, DEFAULT_MQTT_PORT),
+            ): vol.All(vol.Coerce(int), vol.Range(min=1, max=65535)),
+            vol.Optional(
+                CONF_MQTT_USERNAME,
+                default=defaults.get(CONF_MQTT_USERNAME, DEFAULT_MQTT_USERNAME),
+            ): str,
+            vol.Optional(CONF_MQTT_PASSWORD): password_selector,
+            vol.Optional(
+                CONF_MQTT_PSK_IDENTITY,
+                default=defaults.get(CONF_MQTT_PSK_IDENTITY, DEFAULT_MQTT_PSK_IDENTITY),
+            ): str,
+            vol.Optional(CONF_MQTT_PSK): password_selector,
+            vol.Optional(
                 CONF_LEGACY_USERNAME,
                 default=defaults.get(CONF_LEGACY_USERNAME, DEFAULT_LEGACY_USERNAME),
             ): str,
@@ -181,6 +219,20 @@ class RltechConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 user_input[CONF_AP_PASSWORD] = DEFAULT_AP_PASSWORD
             if not user_input.get(CONF_AP_USERNAME):
                 user_input[CONF_AP_USERNAME] = DEFAULT_AP_USERNAME
+            if not user_input.get(CONF_MQTT_HOST):
+                user_input[CONF_MQTT_HOST] = _base_url_to_host(
+                    user_input[CONF_BASE_URL]
+                )
+            else:
+                user_input[CONF_MQTT_HOST] = _base_url_to_host(
+                    user_input[CONF_MQTT_HOST]
+                )
+            if not user_input.get(CONF_MQTT_PASSWORD):
+                user_input[CONF_MQTT_PASSWORD] = DEFAULT_MQTT_PASSWORD
+            if not user_input.get(CONF_MQTT_USERNAME):
+                user_input[CONF_MQTT_USERNAME] = DEFAULT_MQTT_USERNAME
+            if not user_input.get(CONF_MQTT_PSK_IDENTITY):
+                user_input[CONF_MQTT_PSK_IDENTITY] = DEFAULT_MQTT_PSK_IDENTITY
             unique_id = user_input[CONF_BASE_URL].rstrip("/")
             await self.async_set_unique_id(unique_id)
             self._abort_if_unique_id_configured()
@@ -234,6 +286,30 @@ class RltechConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 }
             if not user_input.get(CONF_AP_USERNAME):
                 user_input[CONF_AP_USERNAME] = DEFAULT_AP_USERNAME
+            if not user_input.get(CONF_MQTT_HOST):
+                user_input[CONF_MQTT_HOST] = _base_url_to_host(
+                    user_input[CONF_BASE_URL]
+                )
+            else:
+                user_input[CONF_MQTT_HOST] = _base_url_to_host(
+                    user_input[CONF_MQTT_HOST]
+                )
+            if not user_input.get(CONF_MQTT_PASSWORD):
+                user_input = {
+                    key: value
+                    for key, value in user_input.items()
+                    if key != CONF_MQTT_PASSWORD
+                }
+            if not user_input.get(CONF_MQTT_PSK):
+                user_input = {
+                    key: value
+                    for key, value in user_input.items()
+                    if key != CONF_MQTT_PSK
+                }
+            if not user_input.get(CONF_MQTT_USERNAME):
+                user_input[CONF_MQTT_USERNAME] = DEFAULT_MQTT_USERNAME
+            if not user_input.get(CONF_MQTT_PSK_IDENTITY):
+                user_input[CONF_MQTT_PSK_IDENTITY] = DEFAULT_MQTT_PSK_IDENTITY
             data = {**entry.data, **user_input}
             unique_id = data[CONF_BASE_URL].rstrip("/")
             if unique_id != entry.unique_id:
