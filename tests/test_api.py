@@ -588,6 +588,66 @@ def test_parse_olt_status_table_rendered_browser_values() -> None:
     assert status.current_time is None
 
 
+def test_parse_olt_status_script_rendered_wan_link_uptime() -> None:
+    now = datetime(2026, 8, 20, 15, 0, 0, tzinfo=UTC)
+    status = api.parse_olt_status(
+        """
+        <TR>
+          <TD class="table_title" width="20%">WAN Link Up Time:</TD>
+          <TD>
+            <script language=JavaScript type=text/javascript>
+              function wanUpTime() {
+                var curTime = '1708324';
+                var WanUpTime = '32';
+                var IsWanUp = '1';
+                document.write('calculated by browser');
+              }
+              wanUpTime();
+            </script>&nbsp;
+          </TD>
+        </TR>
+        """,
+        now=now,
+    )
+
+    assert status.wan_link_uptime == "19 Days 18 Hour 31 Min 32 Sec"
+    assert status.wan_link_up_since == datetime(2026, 7, 31, 20, 28, 28, tzinfo=UTC)
+
+
+def test_script_rendered_wan_link_timestamp_is_stabilized() -> None:
+    previous = models.RltechData(
+        olt_status=models.RltechOltStatus(
+            wan_link_up_since=datetime(2026, 7, 31, 20, 28, 0, tzinfo=UTC),
+        )
+    )
+
+    data = api.normalize_snapshot(
+        [],
+        [],
+        olt_html="""
+        <TR>
+          <TD class="table_title" width="20%">WAN Link Up Time:</TD>
+          <TD>
+            <script language=JavaScript type=text/javascript>
+              function wanUpTime() {
+                var curTime = '1708324';
+                var WanUpTime = '32';
+                var IsWanUp = '1';
+              }
+              wanUpTime();
+            </script>&nbsp;
+          </TD>
+        </TR>
+        """,
+        previous=previous,
+        now=datetime(2026, 8, 20, 15, 0, 0, tzinfo=UTC),
+    )
+
+    assert data.olt_status.wan_link_up_since == datetime(
+        2026, 7, 31, 20, 28, 0, tzinfo=UTC
+    )
+
+
 def test_olt_boot_timestamps_are_stabilized_across_small_uptime_drift() -> None:
     last_boot = datetime(2026, 8, 1, 14, 50, 0, tzinfo=UTC)
     wan_up_since = datetime(2026, 8, 1, 14, 51, 0, tzinfo=UTC)

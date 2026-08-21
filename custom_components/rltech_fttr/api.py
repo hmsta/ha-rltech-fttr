@@ -439,13 +439,64 @@ def _duration(value: str | None) -> timedelta | None:
     return timedelta(seconds=total) if total else None
 
 
+def _duration_text(duration: timedelta) -> str:
+    """Format a duration in the same unit names used by the vendor UI."""
+    total = max(0, int(duration.total_seconds()))
+    days, remainder = divmod(total, 86400)
+    hours, remainder = divmod(remainder, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    parts: list[str] = []
+    if days:
+        parts.append(f"{days} Days")
+    if hours or parts:
+        parts.append(f"{hours} Hour")
+    if minutes or parts:
+        parts.append(f"{minutes} Min")
+    parts.append(f"{seconds} Sec")
+    return " ".join(parts)
+
+
+def _function_var_literal(text: str, function_name: str, var_name: str) -> str | None:
+    """Return a JavaScript var literal from a named function body."""
+    match = re.search(rf"function\s+{re.escape(function_name)}\s*\(", text)
+    if not match:
+        return None
+    body = text[match.end() : match.end() + 4000]
+    var_match = re.search(
+        rf"\bvar\s+{re.escape(var_name)}\s*=\s*['\"]([^'\"]*)['\"]",
+        body,
+    )
+    return html.unescape(var_match.group(1).strip()) if var_match else None
+
+
+def _script_wan_link_uptime(text: str) -> str | None:
+    """Parse WAN link uptime rendered by sta-device.asp JavaScript."""
+    is_wan_up = _function_var_literal(text, "wanUpTime", "IsWanUp")
+    if is_wan_up in {"0", "N/A"}:
+        return None
+    cur_time = _int(_function_var_literal(text, "wanUpTime", "curTime"))
+    wan_up_time = _int(_function_var_literal(text, "wanUpTime", "WanUpTime"))
+    if cur_time is None or wan_up_time is None or cur_time < wan_up_time:
+        return None
+    return _duration_text(timedelta(seconds=cur_time - wan_up_time))
+
+
 def parse_olt_status(text: str, *, now: datetime | None = None) -> RltechOltStatus:
     """Parse optional OLT/controller status values from sta-device.asp."""
     now = now or datetime.now(UTC)
     link_state = _int(_js_string(text, "LinkSta"))
     system_uptime = _table_value(text, "Run Time") or _field_literal(text, "sysUpTime")
-    wan_link_uptime = _table_value(text, "WAN Link Up Time") or _field_literal(
-        text, "WanUpTime"
+    wan_table_value = _table_value(text, "WAN Link Up Time")
+    wan_literal_value = _field_literal(text, "WanUpTime")
+    wan_link_uptime = (
+        wan_table_value
+        if _duration(wan_table_value) is not None
+        else _script_wan_link_uptime(text)
+        or (
+            wan_literal_value
+            if wan_literal_value is not None and _duration(wan_literal_value) is not None
+            else None
+        )
     )
     system_duration = _duration(system_uptime)
     wan_duration = _duration(wan_link_uptime)
