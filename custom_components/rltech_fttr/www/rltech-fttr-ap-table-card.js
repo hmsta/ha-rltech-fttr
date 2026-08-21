@@ -99,12 +99,23 @@ class RltechFttrApTableCard extends HTMLElement {
       ["upgrade_flag", "Upgrade"],
       ["optical_rx_power", "Rx dBm", null, null, "optical_rx_power"],
       ["optical_tx_power", "Tx dBm", null, null, "optical_tx_power"],
-      ["reg_off_time", "Reg/Off Time", null, null, "reg_off_time"],
+      [
+        "reg_off_time",
+        "Reg/Off Time",
+        (row) => this._escape(this._formatDateTime(row.reg_off_time)),
+        (row) => row.reg_off_time,
+        "reg_off_time",
+      ],
       ["last_down_cause", "Off reason", null, null, "last_down_cause"],
       ["onu_status", "ONU status"],
       ["interface", "ONU interface"],
       ["source_host", "ONU source"],
-      ["detail_last_update", "ONU update"],
+      [
+        "detail_last_update",
+        "ONU update",
+        (row) => this._escape(this._formatDateTime(row.detail_last_update)),
+        (row) => row.detail_last_update,
+      ],
     ].map(([key, label, render, sort, entityKey]) => ({
       key,
       label,
@@ -1073,6 +1084,17 @@ class RltechFttrApTableCard extends HTMLElement {
   _header(key, label) {
     const suffix = this._sortKey === key ? (this._sortDir === 1 ? " ^" : " v") : "";
     return `<th><button data-key="${key}">${label}${suffix}</button></th>`;
+  }
+
+  _formatDateTime(value) {
+    if (!value) {
+      return "";
+    }
+    const timestamp = Date.parse(value);
+    if (!Number.isFinite(timestamp)) {
+      return value;
+    }
+    return new Date(timestamp).toLocaleString();
   }
 }
 

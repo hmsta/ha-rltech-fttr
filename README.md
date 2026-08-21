@@ -132,8 +132,9 @@ Source ownership is intentionally strict:
   port `80` hosts are represented as separate OLT hardware devices.
 - AP optical/status rows from port `80` are joined to AP inventory by AP serial
   number, not alias, MAC, or IP.
-- `Reg/Off Time` is exposed with that name. For online ONUs it appears to be
-  registration time; for offline ONUs it appears to be off time.
+- `Reg/Off Time` is parsed as a timestamp using Home Assistant's local time
+  zone. For online ONUs it appears to be registration time; for offline ONUs it
+  appears to be off time.
 
 AP devices and AP sensor unique IDs use the AP hardware serial, for example
 `RLGM3BB8E3D0`. AP rows without an `SN` remain visible as table inventory but

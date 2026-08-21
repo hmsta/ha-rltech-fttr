@@ -76,7 +76,7 @@ class RltechApDetail:
     last_down_time: str | None = None
     last_dying_gasp_time: str | None = None
     last_down_cause: str | None = None
-    reg_off_time: str | None = None
+    reg_off_time: datetime | None = None
     interface: str | None = None
     source_host: str | None = None
     register_status: str | None = None

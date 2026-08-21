@@ -6,7 +6,7 @@ import asyncio
 import ast
 from collections.abc import Iterable, Sequence
 from dataclasses import asdict, replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, tzinfo
 import html
 import json
 import logging
@@ -769,7 +769,61 @@ def parse_legacy_lanpon_ports(text: str) -> dict[int, RltechLanPonPort]:
     return ports
 
 
-def parse_legacy_onu_mgmt(text: str, *, source_host: str | None = None) -> dict[str, RltechApDetail]:
+_LEGACY_MONTHS = {
+    "jan": 1,
+    "feb": 2,
+    "mar": 3,
+    "apr": 4,
+    "may": 5,
+    "jun": 6,
+    "jul": 7,
+    "aug": 8,
+    "sep": 9,
+    "oct": 10,
+    "nov": 11,
+    "dec": 12,
+}
+
+
+def _parse_legacy_datetime(
+    value: Any,
+    *,
+    local_timezone: tzinfo = UTC,
+) -> datetime | None:
+    """Parse legacy OLT timestamps such as 'Fri Aug 21 06:12:26 2026'."""
+    text = _none_if_na(value)
+    if text is None:
+        return None
+    match = re.fullmatch(
+        r"[A-Za-z]{3}\s+([A-Za-z]{3})\s+(\d{1,2})\s+"
+        r"(\d{1,2}):(\d{2}):(\d{2})\s+(\d{4})",
+        text,
+    )
+    if not match:
+        return None
+    month = _LEGACY_MONTHS.get(match.group(1).lower())
+    if month is None:
+        return None
+    try:
+        return datetime(
+            int(match.group(6)),
+            month,
+            int(match.group(2)),
+            int(match.group(3)),
+            int(match.group(4)),
+            int(match.group(5)),
+            tzinfo=local_timezone,
+        )
+    except ValueError:
+        return None
+
+
+def parse_legacy_onu_mgmt(
+    text: str,
+    *,
+    source_host: str | None = None,
+    local_timezone: tzinfo = UTC,
+) -> dict[str, RltechApDetail]:
     """Parse AP/ONU optical rows from the legacy onu_mgmt.asp page."""
     rows: dict[str, RltechApDetail] = {}
     for row in _parse_js_call_args(text, "R"):
@@ -797,7 +851,10 @@ def parse_legacy_onu_mgmt(text: str, *, source_host: str | None = None) -> dict[
             optical_rx_power=rx_power,
             onu_status=_none_if_na(row[4]),
             register_status=_none_if_na(row[5]),
-            reg_off_time=_none_if_na(row[2]),
+            reg_off_time=_parse_legacy_datetime(
+                row[2],
+                local_timezone=local_timezone,
+            ),
             last_down_cause=_none_if_na(row[7]),
             source_host=source_host,
         )
@@ -1375,6 +1432,7 @@ class RltechClient:
         base_url: str,
         *,
         now: datetime,
+        local_timezone: tzinfo = UTC,
     ) -> tuple[RltechOltStatus, dict[int, RltechLanPort], dict[int, RltechLanPonPort], dict[str, RltechApDetail]]:
         """Fetch one complete legacy port-80 source."""
         ltime = int(time.time())
@@ -1389,7 +1447,12 @@ class RltechClient:
             lanpon_html = await self.legacy_fetch_html(
                 session, base_url, ltime, f"/lanpon_info.asp?ltime={ltime}"
             )
-            onu_details = await self._fetch_legacy_onu_details(session, base_url, ltime)
+            onu_details = await self._fetch_legacy_onu_details(
+                session,
+                base_url,
+                ltime,
+                local_timezone=local_timezone,
+            )
             return (
                 parse_legacy_runinfo(runinfo_html, now=now),
                 parse_legacy_lan_ports(lan_html),
@@ -1407,6 +1470,8 @@ class RltechClient:
         session: Any,
         base_url: str,
         ltime: int,
+        *,
+        local_timezone: tzinfo = UTC,
     ) -> dict[str, RltechApDetail]:
         """Fetch all legacy ONU pages from one source."""
         details: dict[str, RltechApDetail] = {}
@@ -1420,6 +1485,7 @@ class RltechClient:
             page_details = parse_legacy_onu_mgmt(
                 html_text,
                 source_host=urlsplit(base_url).hostname or base_url,
+                local_timezone=local_timezone,
             )
             if not page_details:
                 break
@@ -1433,6 +1499,7 @@ class RltechClient:
         previous: RltechData | None,
         *,
         now: datetime,
+        local_timezone: tzinfo = UTC,
     ) -> tuple[
         RltechOltStatus | None,
         dict[int, RltechLanPort],
@@ -1453,7 +1520,12 @@ class RltechClient:
             host = urlsplit(base_url).hostname or base_url
             try:
                 source_status, source_lan, source_lanpon, source_onus = (
-                    await self._fetch_legacy_source(session, base_url, now=now)
+                    await self._fetch_legacy_source(
+                        session,
+                        base_url,
+                        now=now,
+                        local_timezone=local_timezone,
+                    )
                 )
             except Exception as err:  # noqa: BLE001 - keep other source / last good values
                 source_error = True
@@ -1494,6 +1566,7 @@ class RltechClient:
         include_station_inventory: bool = True,
         include_hardware_status: bool = True,
         scan_interval: int = 60,
+        local_timezone: tzinfo = UTC,
     ) -> RltechData:
         """Run one serialized login/fetch/logout transaction."""
         async with self._lock:
@@ -1528,6 +1601,7 @@ class RltechClient:
                             aps,
                             previous,
                             now=now,
+                            local_timezone=local_timezone,
                         )
                     )
                 data = normalize_snapshot(

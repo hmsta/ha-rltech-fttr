@@ -520,7 +520,9 @@ def test_parse_legacy_port80_pages() -> None:
     assert lanpon_ports[1].current == 38.56
     assert onu_rows["RLGM3BB8DCE0"].optical_tx_power == -1.79
     assert onu_rows["RLGM3BB8DCE0"].optical_rx_power == -15.46
-    assert onu_rows["RLGM3BB8DCE0"].reg_off_time == "Fri Aug 21 06:12:26 2026"
+    assert onu_rows["RLGM3BB8DCE0"].reg_off_time == datetime(
+        2026, 8, 21, 6, 12, 26, tzinfo=UTC
+    )
     assert onu_rows["RLGM3BB8DCE0"].last_down_cause == "0"
     assert onu_rows["RLGM3BB8DCE0"].source_host == "172.20.11.1"
 
@@ -538,7 +540,7 @@ def test_legacy_onu_details_join_to_aps_by_serial() -> None:
             sn="RLGM3BB8DCE0",
             optical_tx_power=-1.79,
             optical_rx_power=-15.46,
-            reg_off_time="Fri Aug 21 06:12:26 2026",
+            reg_off_time=datetime(2026, 8, 21, 6, 12, 26, tzinfo=UTC),
         )
     }
 

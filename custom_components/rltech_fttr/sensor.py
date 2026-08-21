@@ -191,7 +191,7 @@ AP_SENSORS = (
 class ApDetailSensorDescription(SensorEntityDescription):
     """Description for a slow AP detail sensor."""
 
-    value_fn: Callable[[RltechApDetail], int | float | str | None]
+    value_fn: Callable[[RltechApDetail], int | float | str | datetime | None]
 
 
 AP_DETAIL_SENSORS = (
@@ -217,6 +217,7 @@ AP_DETAIL_SENSORS = (
         key="reg_off_time",
         translation_key="ap_reg_off_time",
         icon="mdi:clock-outline",
+        device_class=SensorDeviceClass.TIMESTAMP,
         entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=lambda detail: detail.reg_off_time,
     ),
@@ -709,7 +710,7 @@ class RltechApDetailSensor(RltechEntity, SensorEntity):
         )
 
     @property
-    def native_value(self) -> int | float | str | None:
+    def native_value(self) -> int | float | str | datetime | None:
         detail = self._detail
         return self.entity_description.value_fn(detail) if detail else None
 

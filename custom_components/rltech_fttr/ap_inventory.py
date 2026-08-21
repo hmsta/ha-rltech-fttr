@@ -14,7 +14,7 @@ def _detail_fields(detail: RltechApDetail | None) -> dict[str, Any]:
         "detail_last_update": detail.last_update.isoformat() if detail.last_update else None,
         "optical_rx_power": detail.optical_rx_power,
         "optical_tx_power": detail.optical_tx_power,
-        "reg_off_time": detail.reg_off_time,
+        "reg_off_time": detail.reg_off_time.isoformat() if detail.reg_off_time else None,
         "last_down_cause": detail.last_down_cause,
         "onu_status": detail.onu_status,
         "interface": detail.interface,

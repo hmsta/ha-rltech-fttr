@@ -12,6 +12,7 @@ from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.helpers.update_coordinator import UpdateFailed
+from homeassistant.util import dt as dt_util
 
 from .api import AccountBusyError, AuthenticationError, RltechClient
 from .const import (
@@ -81,6 +82,7 @@ class RltechCoordinator(DataUpdateCoordinator[RltechData]):
                 scan_interval=self.config_entry.data.get(
                     CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
                 ),
+                local_timezone=dt_util.DEFAULT_TIME_ZONE,
             )
         except AuthenticationError as err:
             raise ConfigEntryAuthFailed from err
