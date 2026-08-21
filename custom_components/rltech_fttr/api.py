@@ -42,6 +42,7 @@ BANDWIDTH_MAP = {
     4: "20/40/80 MHz",
     5: "20/40/80/160 MHz",
 }
+_BOOT_TIME_DRIFT_GRACE = timedelta(minutes=2)
 
 
 def _client_timeout(seconds: int) -> Any:
@@ -476,6 +477,35 @@ def parse_olt_status(text: str, *, now: datetime | None = None) -> RltechOltStat
     )
 
 
+def _stable_datetime(
+    new_value: datetime | None,
+    old_value: datetime | None,
+    *,
+    grace: timedelta = _BOOT_TIME_DRIFT_GRACE,
+) -> datetime | None:
+    """Keep derived timestamps stable across small uptime/poll timing drift."""
+    if new_value is None or old_value is None:
+        return new_value
+    if abs(new_value - old_value) <= grace:
+        return old_value
+    return new_value
+
+
+def _stabilize_olt_status(
+    status: RltechOltStatus | None, previous: RltechData | None
+) -> RltechOltStatus | None:
+    """Preserve prior OLT boot/link timestamps when only parser drift changed."""
+    if status is None or previous is None or previous.olt_status is None:
+        return status
+    return replace(
+        status,
+        last_boot=_stable_datetime(status.last_boot, previous.olt_status.last_boot),
+        wan_link_up_since=_stable_datetime(
+            status.wan_link_up_since, previous.olt_status.wan_link_up_since
+        ),
+    )
+
+
 def parse_lan_ports(text: str) -> dict[int, RltechLanPort]:
     """Parse LAN Ethernet port rows from sta-user.asp."""
     try:
@@ -618,11 +648,13 @@ def normalize_snapshot(
                     }
                 )
 
+    olt_status = parse_olt_status(olt_html, now=now) if olt_html is not None else None
+
     return RltechData(
         aps=aps,
         ap_details=ap_details or {},
         stations=stations,
-        olt_status=parse_olt_status(olt_html, now=now) if olt_html is not None else None,
+        olt_status=_stabilize_olt_status(olt_status, previous),
         lan_ports=parse_lan_ports(user_html) if user_html is not None else {},
         lanpon_ports=parse_lanpon_ports(user_html) if user_html is not None else {},
         last_success=now,

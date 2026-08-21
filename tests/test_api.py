@@ -588,6 +588,45 @@ def test_parse_olt_status_table_rendered_browser_values() -> None:
     assert status.current_time is None
 
 
+def test_olt_boot_timestamps_are_stabilized_across_small_uptime_drift() -> None:
+    last_boot = datetime(2026, 8, 1, 14, 50, 0, tzinfo=UTC)
+    wan_up_since = datetime(2026, 8, 1, 14, 51, 0, tzinfo=UTC)
+    previous = models.RltechData(
+        olt_status=models.RltechOltStatus(
+            last_boot=last_boot,
+            wan_link_up_since=wan_up_since,
+        )
+    )
+
+    data = api.normalize_snapshot(
+        [],
+        [],
+        olt_html="""
+        <TR><TD class="table_title">Run Time:</TD><TD>10 Min 45 Sec&nbsp;</TD></TR>
+        <TR><TD class="table_title">WAN Link Up Time:</TD><TD>9 Min 45 Sec&nbsp;</TD></TR>
+        """,
+        previous=previous,
+        now=datetime(2026, 8, 1, 15, 0, 45, tzinfo=UTC),
+    )
+
+    assert data.olt_status.last_boot == last_boot
+    assert data.olt_status.wan_link_up_since == wan_up_since
+
+    rebooted = api.normalize_snapshot(
+        [],
+        [],
+        olt_html="""
+        <TR><TD class="table_title">Run Time:</TD><TD>3 Min&nbsp;</TD></TR>
+        <TR><TD class="table_title">WAN Link Up Time:</TD><TD>2 Min&nbsp;</TD></TR>
+        """,
+        previous=previous,
+        now=datetime(2026, 8, 1, 15, 10, 0, tzinfo=UTC),
+    )
+
+    assert rebooted.olt_status.last_boot == datetime(2026, 8, 1, 15, 7, 0, tzinfo=UTC)
+    assert rebooted.olt_status.wan_link_up_since == datetime(2026, 8, 1, 15, 8, 0, tzinfo=UTC)
+
+
 def test_parse_lan_and_lanpon_ports() -> None:
     html = """
     var lancntvalue = '{"data":[{"Port":"1", "LanState":"1", "TxBytes":"9643532541", "RxBytes":"9726199278", "Negoration":"1000M", "Mode":"Full"},{"Port":"2", "LanState":"0", "TxBytes":"0", "RxBytes":"0", "Negoration":"Down", "Mode":""},{"Port":"5", "LanState":"1", "TxBytes":"2095094151", "RxBytes":"18446744073115276764", "Negoration":"2500M", "Mode":"Full"}]}';
