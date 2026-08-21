@@ -560,12 +560,14 @@ class RltechFttrApTableCard extends HTMLElement {
           border-radius: 8px;
           box-shadow: 0 8px 22px rgba(0, 0, 0, 0.22);
           max-height: 70vh;
-          min-width: 230px;
+          max-width: min(420px, calc(100vw - 32px));
+          min-width: 280px;
           overflow: auto;
           padding: 10px;
           position: absolute;
           right: 0;
           top: 38px;
+          width: max-content;
           z-index: 5;
         }
         .menu-title {
@@ -581,11 +583,13 @@ class RltechFttrApTableCard extends HTMLElement {
         }
         .column-panel label {
           align-items: center;
-          display: flex;
+          display: grid;
           font-size: 13px;
           gap: 8px;
-          justify-content: flex-start;
+          grid-template-columns: 20px max-content;
+          justify-content: start;
           line-height: 1.3;
+          white-space: nowrap;
         }
         .column-panel input[type="checkbox"] {
           flex: 0 0 auto;
@@ -727,6 +731,35 @@ class RltechFttrApTableCard extends HTMLElement {
           .toolbar select {
             flex: 1 1 calc(50% - 8px);
             min-width: 0;
+          }
+          .options { position: static; }
+          .options-menu {
+            border-radius: 10px 10px 0 0;
+            bottom: 0;
+            box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.28);
+            left: 0;
+            max-height: 78vh;
+            max-width: none;
+            min-width: 0;
+            padding: 14px;
+            position: fixed;
+            right: 0;
+            top: auto;
+            width: auto;
+            z-index: 20;
+          }
+          .column-panel {
+            gap: 10px;
+            grid-template-columns: 1fr;
+          }
+          .column-panel label {
+            font-size: 15px;
+            grid-template-columns: 24px max-content;
+            min-height: 28px;
+          }
+          .column-panel input[type="checkbox"] {
+            height: 20px;
+            width: 20px;
           }
           .table-wrap { display: none; }
           .mobile-list { display: block; }
