@@ -975,6 +975,56 @@ def test_fetch_snapshot_can_skip_ap_and_station_pages() -> None:
     asyncio.run(run())
 
 
+def test_reboot_ap_uses_direct_ap_login_and_reset_form() -> None:
+    async def run() -> None:
+        client = api.RltechClient(
+            "http://olt",
+            "olt-user",
+            "olt-pass",
+            ap_username="ap-user",
+            ap_password="ap-pass",
+        )
+        ap = models.RltechAp(mac="44:95:3B:B8:DC:D0", ip="172.20.11.24")
+        session = FakeSession(
+            [
+                FakeResponse(
+                    200,
+                    json.dumps(
+                        {
+                            "Logged": "0",
+                            "Privilege": "1",
+                            "Active": "1",
+                            "ecntToken": "ap-token",
+                        }
+                    ),
+                ),
+                FakeResponse(200, ""),
+            ]
+        )
+
+        await client.reboot_ap(session, ap)
+
+        assert session.calls[0][1] == "http://172.20.11.24/cgi-bin/check_auth.json"
+        assert session.calls[0][2]["data"][0:2] == [
+            ("username", "ap-user"),
+            ("password", "ap-pass"),
+        ]
+        assert session.calls[1][1] == "http://172.20.11.24/cgi-bin/mag-reset.asp"
+        assert session.calls[1][2]["data"] == [
+            ("rebootflag", "1"),
+            ("restoreFlag", "1"),
+            ("isCUCSupport", "0"),
+        ]
+        assert api.eboo_value(session.calls[1][2]["data"]) == "9b490b66"
+        assert session.calls[1][2]["headers"]["Cookie"] == (
+            "ecntToken=ap-token; EBOOVALUE="
+            + api.eboo_value(session.calls[1][2]["data"])
+        )
+        assert all("logout" not in call[1] for call in session.calls)
+
+    asyncio.run(run())
+
+
 def html_payload(name: str, body: dict) -> str:
     return f"var {name} = '{json.dumps(body).replace('&', '&amp;')}';"
 

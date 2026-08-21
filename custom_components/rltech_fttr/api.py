@@ -1001,6 +1001,8 @@ class RltechClient:
         legacy_base_urls: Sequence[str] | None = None,
         legacy_username: str | None = None,
         legacy_password: str | None = None,
+        ap_username: str | None = None,
+        ap_password: str | None = None,
         timeout: int = 10,
     ) -> None:
         self.base_url = base_url.rstrip("/")
@@ -1009,16 +1011,25 @@ class RltechClient:
         self.legacy_base_urls = [url.rstrip("/") for url in legacy_base_urls or []]
         self.legacy_username = legacy_username or ""
         self.legacy_password = legacy_password or ""
+        self.ap_username = ap_username or username
+        self.ap_password = ap_password or password
         self.timeout = timeout
         self.token: str | None = None
         self._lock = asyncio.Lock()
         self._ap_detail_cursor = 0
 
-    async def login(self, session: Any) -> None:
-        """Authenticate and retain the returned token."""
+    async def _login_to_base_url(
+        self,
+        session: Any,
+        base_url: str,
+        username: str,
+        password: str,
+    ) -> str:
+        """Authenticate to one ecntToken Web UI base URL and return its token."""
+        base_url = base_url.rstrip("/")
         fields = [
-            ("username", self.username),
-            ("password", self.password),
+            ("username", username),
+            ("password", password),
             ("Language_Flag", "0"),
             ("selectLanguage", "English"),
         ]
@@ -1026,12 +1037,12 @@ class RltechClient:
             "Accept": "application/json, text/javascript, */*; q=0.01",
             "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
             "Cookie": "EBOOVALUE=ecntBaorga; loginTimes=0",
-            "Origin": self.base_url,
-            "Referer": f"{self.base_url}/cgi-bin/login.asp",
+            "Origin": base_url,
+            "Referer": f"{base_url}/cgi-bin/login.asp",
             "X-Requested-With": "XMLHttpRequest",
         }
         async with session.post(
-            f"{self.base_url}/cgi-bin/check_auth.json",
+            f"{base_url}/cgi-bin/check_auth.json",
             data=fields,
             headers=headers,
             allow_redirects=False,
@@ -1057,7 +1068,16 @@ class RltechClient:
         token = str(result.get("ecntToken", ""))
         if not token or set(token) == {"0"}:
             raise AuthenticationError("login returned no usable token")
-        self.token = token
+        return token
+
+    async def login(self, session: Any) -> None:
+        """Authenticate and retain the returned token."""
+        self.token = await self._login_to_base_url(
+            session,
+            self.base_url,
+            self.username,
+            self.password,
+        )
 
     async def logout(self, session: Any) -> None:
         """Log out the retained Web UI token."""
@@ -1244,6 +1264,41 @@ class RltechClient:
         if "check_auth.json" in text and "username" in text:
             raise SessionExpired("AP detail request returned login page")
         return text
+
+    async def reboot_ap(self, session: Any, ap: RltechAp) -> None:
+        """Reboot one managed AP through its direct Web UI."""
+        if not ap.ip:
+            raise UnexpectedResponse("AP reboot needs AP IP address")
+        base_url = urlunsplit(("http", ap.ip, "", "", ""))
+        fields = [
+            ("rebootflag", "1"),
+            ("restoreFlag", "1"),
+            ("isCUCSupport", "0"),
+        ]
+        async with self._lock:
+            token = await self._login_to_base_url(
+                session,
+                base_url,
+                self.ap_username,
+                self.ap_password,
+            )
+            url = f"{base_url}/cgi-bin/mag-reset.asp"
+            async with session.post(
+                url,
+                data=fields,
+                headers={
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "Cookie": f"ecntToken={token}; EBOOVALUE={eboo_value(fields)}",
+                    "Origin": base_url,
+                    "Referer": url,
+                },
+                allow_redirects=False,
+                timeout=_client_timeout(self.timeout),
+            ) as response:
+                await response.read()
+                if response.status not in {200, 204, 302, 303}:
+                    raise UnexpectedResponse(f"AP reboot HTTP status {response.status}")
 
     async def _fetch_all(
         self,

@@ -24,8 +24,12 @@ from .const import (
     CONF_LEGACY_USERNAME,
     CONF_SCAN_INTERVAL,
     CONF_ENABLE_STATION_POLLING,
+    CONF_AP_PASSWORD,
+    CONF_AP_USERNAME,
     DEFAULT_ENABLE_HARDWARE_STATUS,
     DEFAULT_ENABLE_AP_POLLING,
+    DEFAULT_AP_PASSWORD,
+    DEFAULT_AP_USERNAME,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_ENABLE_STATION_POLLING,
     DEFAULT_STATION_RETENTION,
@@ -110,6 +114,8 @@ def build_client(entry: ConfigEntry) -> RltechClient:
         legacy_base_urls=legacy_hosts,
         legacy_username=entry.data.get(CONF_LEGACY_USERNAME, "admin"),
         legacy_password=entry.data.get(CONF_LEGACY_PASSWORD, "admin"),
+        ap_username=entry.data.get(CONF_AP_USERNAME, DEFAULT_AP_USERNAME),
+        ap_password=entry.data.get(CONF_AP_PASSWORD, DEFAULT_AP_PASSWORD),
     )
 
 

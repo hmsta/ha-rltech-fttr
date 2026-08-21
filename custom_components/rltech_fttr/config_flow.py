@@ -15,6 +15,8 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import AccountBusyError, AuthenticationError, RltechClient
 from .const import (
+    CONF_AP_PASSWORD,
+    CONF_AP_USERNAME,
     CONF_BASE_URL,
     CONF_ENABLE_AP_POLLING,
     CONF_ENABLE_HARDWARE_STATUS,
@@ -25,6 +27,8 @@ from .const import (
     CONF_SCAN_INTERVAL,
     CONF_ENABLE_STATION_POLLING,
     DEFAULT_BASE_URL,
+    DEFAULT_AP_PASSWORD,
+    DEFAULT_AP_USERNAME,
     DEFAULT_USERNAME,
     DEFAULT_ENABLE_HARDWARE_STATUS,
     DEFAULT_ENABLE_AP_POLLING,
@@ -94,6 +98,13 @@ def _schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
         schema[vol.Optional(CONF_PASSWORD)] = password_selector
     else:
         schema[vol.Required(CONF_PASSWORD)] = password_selector
+    schema[
+        vol.Optional(
+            CONF_AP_USERNAME,
+            default=defaults.get(CONF_AP_USERNAME, DEFAULT_AP_USERNAME),
+        )
+    ] = str
+    schema[vol.Optional(CONF_AP_PASSWORD)] = password_selector
     schema.update(
         {
             vol.Optional(
@@ -166,6 +177,10 @@ class RltechConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             user_input[CONF_BASE_URL] = _host_to_base_url(user_input[CONF_BASE_URL])
             if not user_input.get(CONF_LEGACY_PASSWORD):
                 user_input[CONF_LEGACY_PASSWORD] = DEFAULT_LEGACY_PASSWORD
+            if not user_input.get(CONF_AP_PASSWORD):
+                user_input[CONF_AP_PASSWORD] = DEFAULT_AP_PASSWORD
+            if not user_input.get(CONF_AP_USERNAME):
+                user_input[CONF_AP_USERNAME] = DEFAULT_AP_USERNAME
             unique_id = user_input[CONF_BASE_URL].rstrip("/")
             await self.async_set_unique_id(unique_id)
             self._abort_if_unique_id_configured()
@@ -211,6 +226,14 @@ class RltechConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     for key, value in user_input.items()
                     if key != CONF_LEGACY_PASSWORD
                 }
+            if not user_input.get(CONF_AP_PASSWORD):
+                user_input = {
+                    key: value
+                    for key, value in user_input.items()
+                    if key != CONF_AP_PASSWORD
+                }
+            if not user_input.get(CONF_AP_USERNAME):
+                user_input[CONF_AP_USERNAME] = DEFAULT_AP_USERNAME
             data = {**entry.data, **user_input}
             unique_id = data[CONF_BASE_URL].rstrip("/")
             if unique_id != entry.unique_id:

@@ -15,6 +15,8 @@
           "enable_hardware_status": "Enable hardware and ONU status polling",
           "legacy_username": "Port 80 username",
           "legacy_password": "Port 80 password",
+          "ap_username": "AP username",
+          "ap_password": "AP password",
           "legacy_hosts": "Additional port 80 OLT hosts",
           "ap_area_id": "Area for AP devices"
         }
@@ -32,6 +34,8 @@
           "enable_hardware_status": "Enable hardware and ONU status polling",
           "legacy_username": "Port 80 username",
           "legacy_password": "Port 80 password",
+          "ap_username": "AP username",
+          "ap_password": "AP password",
           "legacy_hosts": "Additional port 80 OLT hosts",
           "ap_area_id": "Area for AP devices"
         }
@@ -49,6 +53,9 @@
     }
   },
   "entity": {
+    "button": {
+      "ap_reboot": { "name": "Reboot" }
+    },
     "sensor": {
       "ap_count": { "name": "AP count" },
       "online_ap_count": { "name": "Online AP count" },

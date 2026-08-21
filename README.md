@@ -1,6 +1,6 @@
 # RLTech FTTR Home Assistant integration
 
-Read-only custom integration for RLTech OLT/FTTR Web UI inventory data.
+Custom integration for RLTech OLT/FTTR Web UI inventory data.
 
 The integration reads two RLTech Web UI planes:
 
@@ -56,6 +56,8 @@ Add the integration from the Home Assistant UI. Required fields:
 - Password for the port `8080` FTTR Web UI
 - Port `80` username, default `admin`
 - Port `80` password, default `admin`
+- AP username for direct AP actions, default `useradmin`
+- AP password for direct AP actions, default `1234`
 - Additional port `80` OLT hosts, optional. Use this for downstream/slave OLTs
   whose ONU optical rows should enrich the APs discovered from the master.
 - Scan interval, default `60` seconds
@@ -69,6 +71,10 @@ Add the integration from the Home Assistant UI. Required fields:
 The OLT serves plain HTTP in the observed deployment. Use this only on a trusted
 management network or VPN.
 
+The AP reboot button logs into the AP directly at `http://<ap-ip>` with the
+configured AP credentials and posts the RLTech reboot form. It does not log out
+after a successful reboot request because the AP Web UI is expected to restart.
+
 ## Entities
 
 - One device for the OLT/controller with aggregate and optional health sensors.
@@ -76,7 +82,7 @@ management network or VPN.
   host, with its own CPU, memory, LAN, and LAN-PON sensors.
 - One Home Assistant device per managed AP with an `SN`, with AP status,
   associated-client-count, profile, alias, and optional AP optical/status
-  sensors.
+  sensors, plus a config button to reboot the AP through its direct Web UI.
 - Aggregate station sensors, including reported station count.
 - Optional LAN and LAN-PON diagnostic port sensors.
 
