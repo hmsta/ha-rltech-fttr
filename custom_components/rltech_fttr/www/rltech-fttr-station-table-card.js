@@ -152,6 +152,7 @@ class RltechFttrStationTableCard extends HTMLElement {
         this._refreshColumnPicker();
         this._renderHeaders();
         this._refreshPageSize();
+        this._refreshMobileSortControls();
         this._scheduleFetch(true);
       }
     };
@@ -274,6 +275,7 @@ class RltechFttrStationTableCard extends HTMLElement {
     this._refreshColumnPicker();
     this._refreshPageSize();
     this._renderHeaders();
+    this._refreshMobileSortControls();
     this._scheduleFetch(true);
   }
 
@@ -442,6 +444,8 @@ class RltechFttrStationTableCard extends HTMLElement {
             </select>
             <button id="clear-filters" type="button" hidden>Clear</button>
             <select id="page-size" title="Rows per page"></select>
+            <select id="mobile-sort" class="mobile-sort" title="Sort field" aria-label="Sort field"></select>
+            <button id="mobile-sort-dir" class="mobile-sort mobile-sort-dir" type="button" title="Sort direction" aria-label="Sort direction"></button>
             <div class="options">
               <button id="options" class="options-button" type="button" title="Table options" aria-label="Table options">
                 <span></span><span></span><span></span>
@@ -515,6 +519,12 @@ class RltechFttrStationTableCard extends HTMLElement {
         .toolbar select {
           flex: 0 1 132px;
           min-width: 92px;
+        }
+        .mobile-sort { display: none; }
+        .mobile-sort-dir {
+          flex: 0 0 42px;
+          min-width: 42px;
+          padding: 0;
         }
         input:not([type="checkbox"]), select, button {
           background: var(--card-background-color);
@@ -702,6 +712,12 @@ class RltechFttrStationTableCard extends HTMLElement {
             flex: 1 1 calc(50% - 8px);
             min-width: 0;
           }
+          .mobile-sort { display: block; }
+          .mobile-sort-dir {
+            align-items: center;
+            display: inline-flex;
+            justify-content: center;
+          }
           .options { position: static; }
           .options-menu {
             border-radius: 10px 10px 0 0;
@@ -765,6 +781,22 @@ class RltechFttrStationTableCard extends HTMLElement {
       this._savePreferences();
       this._scheduleFetch(true);
     });
+    this.shadowRoot.getElementById("mobile-sort").addEventListener("change", (event) => {
+      this._sortKey = event.target.value;
+      this._page = 0;
+      this._savePreferences();
+      this._renderHeaders();
+      this._refreshMobileSortControls();
+      this._scheduleFetch(true);
+    });
+    this.shadowRoot.getElementById("mobile-sort-dir").addEventListener("click", () => {
+      this._sortDir *= -1;
+      this._page = 0;
+      this._savePreferences();
+      this._renderHeaders();
+      this._refreshMobileSortControls();
+      this._scheduleFetch(true);
+    });
     this.shadowRoot.getElementById("prev").addEventListener("click", () => {
       this._page = Math.max(0, this._page - 1);
       this._scheduleFetch(true);
@@ -778,6 +810,7 @@ class RltechFttrStationTableCard extends HTMLElement {
     });
     this._refreshPageSize();
     this._renderHeaders();
+    this._refreshMobileSortControls();
     this._refreshColumnPicker();
     this._refreshFilterOptions();
     this._shellRendered = true;
@@ -793,6 +826,23 @@ class RltechFttrStationTableCard extends HTMLElement {
     for (const button of this.shadowRoot.querySelectorAll("th button[data-key]")) {
       button.addEventListener("click", () => this._sort(button.dataset.key));
     }
+  }
+
+  _refreshMobileSortControls() {
+    const select = this.shadowRoot.getElementById("mobile-sort");
+    const button = this.shadowRoot.getElementById("mobile-sort-dir");
+    if (!select || !button) {
+      return;
+    }
+    const columns = this._columnDefs().filter((col) => col.key !== "details");
+    select.innerHTML = columns
+      .map((col) => `<option value="${this._escape(col.key)}">${this._escape(col.label)}</option>`)
+      .join("");
+    if (!columns.some((col) => col.key === this._sortKey)) {
+      this._sortKey = columns[0]?.key || "";
+    }
+    select.value = this._sortKey;
+    button.textContent = this._sortDir === 1 ? "^" : "v";
   }
 
   _refreshColumnPicker() {
@@ -902,6 +952,7 @@ class RltechFttrStationTableCard extends HTMLElement {
     this._page = 0;
     this._savePreferences();
     this._renderHeaders();
+    this._refreshMobileSortControls();
     this._scheduleFetch(true);
   }
 
