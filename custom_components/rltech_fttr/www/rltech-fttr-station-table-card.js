@@ -450,12 +450,6 @@ class RltechFttrStationTableCard extends HTMLElement {
               <button id="options" class="options-button" type="button" title="Table options" aria-label="Table options">
                 <span></span><span></span><span></span>
               </button>
-              <div id="options-menu" class="options-menu" hidden>
-                <div class="menu-title">Columns</div>
-                <div id="column-panel" class="column-panel"></div>
-                <div class="menu-title">View</div>
-                <button id="reset" class="menu-button" type="button">Reset view</button>
-              </div>
             </div>
           </div>
           <div id="meta" class="meta"></div>
@@ -479,6 +473,20 @@ class RltechFttrStationTableCard extends HTMLElement {
               <button id="dialog-close" type="button">Close</button>
             </div>
             <div id="dialog-body" class="details"></div>
+          </div>
+        </div>
+        <div id="options-dialog" class="dialog" hidden>
+          <div class="dialog-card options-dialog-card">
+            <div class="dialog-head">
+              <strong>Table options</strong>
+              <button id="options-close" type="button">Close</button>
+            </div>
+            <div class="menu-title">Columns</div>
+            <div id="column-panel" class="column-panel"></div>
+            <div class="menu-title">View</div>
+            <div class="dialog-actions">
+              <button id="reset" class="menu-button" type="button">Reset view</button>
+            </div>
           </div>
         </div>
       </ha-card>
@@ -556,22 +564,6 @@ class RltechFttrStationTableCard extends HTMLElement {
           height: 2px;
           width: 16px;
         }
-        .options-menu {
-          background: var(--card-background-color);
-          border: 1px solid var(--divider-color);
-          border-radius: 8px;
-          box-shadow: 0 8px 22px rgba(0, 0, 0, 0.22);
-          max-height: 70vh;
-          max-width: min(420px, calc(100vw - 32px));
-          min-width: 280px;
-          overflow: auto;
-          padding: 10px;
-          position: absolute;
-          right: 0;
-          top: 38px;
-          width: max-content;
-          z-index: 5;
-        }
         .menu-title {
           color: var(--secondary-text-color);
           font-size: 12px;
@@ -585,12 +577,11 @@ class RltechFttrStationTableCard extends HTMLElement {
         }
         .column-panel label {
           align-items: center;
-          display: grid;
+          display: flex;
           font-size: 13px;
           gap: 8px;
-          grid-template-columns: 20px max-content;
-          justify-content: start;
           line-height: 1.3;
+          min-height: 28px;
           white-space: nowrap;
         }
         .column-panel input[type="checkbox"] {
@@ -690,6 +681,9 @@ class RltechFttrStationTableCard extends HTMLElement {
           overflow: auto;
           padding: 16px;
         }
+        .options-dialog-card {
+          max-width: 420px;
+        }
         .dialog-head {
           align-items: center;
           display: flex;
@@ -705,8 +699,17 @@ class RltechFttrStationTableCard extends HTMLElement {
         .details div:nth-child(odd) {
           color: var(--secondary-text-color);
         }
+        .dialog-actions {
+          margin-top: 10px;
+        }
         @media (max-width: 760px) {
           .wrap { padding: 10px; }
+          .dialog-card {
+            box-sizing: border-box;
+            margin: 4vh 10px;
+            max-width: none;
+            width: calc(100vw - 20px);
+          }
           .toolbar input,
           .toolbar select {
             flex: 1 1 calc(50% - 8px);
@@ -719,28 +722,12 @@ class RltechFttrStationTableCard extends HTMLElement {
             justify-content: center;
           }
           .options { position: static; }
-          .options-menu {
-            border-radius: 10px 10px 0 0;
-            bottom: 0;
-            box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.28);
-            left: 0;
-            max-height: 78vh;
-            max-width: none;
-            min-width: 0;
-            padding: 14px;
-            position: fixed;
-            right: 0;
-            top: auto;
-            width: auto;
-            z-index: 20;
-          }
           .column-panel {
             gap: 10px;
             grid-template-columns: 1fr;
           }
           .column-panel label {
             font-size: 15px;
-            grid-template-columns: 24px max-content;
             min-height: 28px;
           }
           .column-panel input[type="checkbox"] {
@@ -772,8 +759,12 @@ class RltechFttrStationTableCard extends HTMLElement {
       event.stopPropagation();
       this._toggleOptions();
     });
-    this.shadowRoot.getElementById("options-menu").addEventListener("click", (event) => event.stopPropagation());
-    this.shadowRoot.addEventListener("click", () => this._closeOptions());
+    this.shadowRoot.getElementById("options-dialog").addEventListener("click", (event) => {
+      if (event.target.id === "options-dialog") {
+        this._closeOptions();
+      }
+    });
+    this.shadowRoot.getElementById("options-close").addEventListener("click", () => this._closeOptions());
     this.shadowRoot.getElementById("reset").addEventListener("click", () => this._resetPreferences());
     this.shadowRoot.getElementById("page-size").addEventListener("change", (event) => {
       this._setActivePageSize(Number(event.target.value));
@@ -983,12 +974,14 @@ class RltechFttrStationTableCard extends HTMLElement {
   }
 
   _toggleOptions() {
-    const menu = this.shadowRoot.getElementById("options-menu");
-    menu.hidden = !menu.hidden;
+    this.shadowRoot.getElementById("options-dialog").hidden = false;
   }
 
   _closeOptions() {
-    this.shadowRoot.getElementById("options-menu").hidden = true;
+    const dialog = this.shadowRoot.getElementById("options-dialog");
+    if (dialog) {
+      dialog.hidden = true;
+    }
   }
 
   _debouncedFetch() {
