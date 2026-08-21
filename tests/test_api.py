@@ -413,6 +413,7 @@ def test_ap_sensor_unique_id_prefers_serial() -> None:
     )
     assert identifiers.AP_SENSOR_KEYS[:4] == ("online", "assoc_count", "profile", "alias")
     assert "optical_rx_power" in identifiers.AP_SENSOR_KEYS
+    assert "source_host" in identifiers.AP_SENSOR_KEYS
 
 
 def test_stable_sensor_object_ids_use_hardware_identity() -> None:

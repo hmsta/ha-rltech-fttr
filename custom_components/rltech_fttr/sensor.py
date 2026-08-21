@@ -228,6 +228,13 @@ AP_DETAIL_SENSORS = (
         entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=lambda detail: detail.last_down_cause,
     ),
+    ApDetailSensorDescription(
+        key="source_host",
+        translation_key="ap_source_host",
+        icon="mdi:server-network",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda detail: detail.source_host,
+    ),
 )
 
 
@@ -362,6 +369,7 @@ SENSOR_NAMES = {
     "optical_tx_power": "Optical TX power",
     "reg_off_time": "Reg/Off Time",
     "last_down_cause": "Last off reason",
+    "source_host": "Source host",
 }
 
 

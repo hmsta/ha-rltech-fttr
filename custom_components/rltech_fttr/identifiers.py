@@ -15,6 +15,7 @@ AP_SENSOR_KEYS = (
     "optical_tx_power",
     "reg_off_time",
     "last_down_cause",
+    "source_host",
 )
 
 

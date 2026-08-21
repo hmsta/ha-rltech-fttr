@@ -73,7 +73,8 @@
       "ap_optical_rx_power": { "name": "Optical RX power" },
       "ap_optical_tx_power": { "name": "Optical TX power" },
       "ap_reg_off_time": { "name": "Reg/Off Time" },
-      "ap_last_off_reason": { "name": "Last off reason" }
+      "ap_last_off_reason": { "name": "Last off reason" },
+      "ap_source_host": { "name": "Source host" }
     }
   }
 }

@@ -106,10 +106,16 @@ class RltechFttrApTableCard extends HTMLElement {
         (row) => row.reg_off_time,
         "reg_off_time",
       ],
-      ["last_down_cause", "Off reason", null, null, "last_down_cause"],
+      [
+        "last_down_cause",
+        "Off reason",
+        (row) => this._escape(this._formatOffReason(row.last_down_cause)),
+        (row) => this._formatOffReason(row.last_down_cause),
+        "last_down_cause",
+      ],
       ["onu_status", "ONU status"],
       ["interface", "ONU interface"],
-      ["source_host", "ONU source"],
+      ["source_host", "ONU source", null, null, "source_host"],
       [
         "detail_last_update",
         "ONU update",
@@ -1095,6 +1101,25 @@ class RltechFttrApTableCard extends HTMLElement {
       return value;
     }
     return new Date(timestamp).toLocaleString();
+  }
+
+  _formatOffReason(value) {
+    const text = String(value ?? "").trim();
+    if (!text) {
+      return "";
+    }
+    const map = {
+      0: "none",
+      1: "wire down",
+      2: "pon los",
+      3: "dying gasp",
+      4: "reboot",
+      5: "deactive",
+      6: "manual reg",
+      7: "black list",
+      8: "admin down",
+    };
+    return map[text] || text;
   }
 }
 
