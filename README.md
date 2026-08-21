@@ -2,11 +2,13 @@
 
 Read-only custom integration for RLTech OLT/FTTR Web UI inventory data.
 
-The integration logs in to the OLT Web UI for each poll, reads the managed AP
-inventory, Wi-Fi station inventory, optional OLT/controller status, and optional
-LAN/LAN-PON status. Optional AP optical details are polled on a slower interval.
-The integration logs out immediately after each poll so the single Web UI
-session is not kept open.
+The integration reads two RLTech Web UI planes:
+
+- Port `8080` for FTTR AP and Wi-Fi station inventory.
+- Port `80` for OLT hardware, LAN/LAN-PON, and ONU optical status.
+
+The integration logs out immediately after each poll so Web UI sessions are not
+kept open.
 
 ## HACS install
 
@@ -49,17 +51,18 @@ Copy `custom_components/rltech_fttr` into Home Assistant's
 Add the integration from the Home Assistant UI. Required fields:
 
 - OLT IP address or hostname, for example `192.168.1.1`. The integration
-  automatically uses `http://` and port `8080`.
-- Username
-- Password
+  automatically uses `http://`, port `8080`, and port `80`.
+- Username for the port `8080` FTTR Web UI
+- Password for the port `8080` FTTR Web UI
+- Port `80` username, default `admin`
+- Port `80` password, default `admin`
+- Additional port `80` OLT hosts, optional. Use this for downstream/slave OLTs
+  whose ONU optical rows should enrich the APs discovered from the master.
 - Scan interval, default `60` seconds
 - Station retention, default `3600` seconds
 - AP inventory polling, enabled by default
 - Station inventory polling, enabled by default
-- OLT status polling, enabled by default
-- LAN port status polling, enabled by default
-- AP optical detail polling, enabled by default
-- AP optical detail interval, default `600` seconds
+- Hardware and ONU status polling, enabled by default
 - Area for AP devices, optional. When set, newly created AP devices are assigned
   to this area if they do not already have an area.
 
@@ -69,10 +72,11 @@ management network or VPN.
 ## Entities
 
 - One device for the OLT/controller with aggregate and optional health sensors.
+- One additional OLT hardware device for each configured additional port `80`
+  host, with its own CPU, memory, LAN, and LAN-PON sensors.
 - One Home Assistant device per managed AP with an `SN`, with AP status,
-  associated-client-count, profile, alias, and optional AP optical/detail
-  sensors. These detail sensors are created with the AP and remain unknown
-  until the slower AP optical detail poll has data for that AP.
+  associated-client-count, profile, alias, and optional AP optical/status
+  sensors.
 - Aggregate station sensors, including reported station count.
 - Optional LAN and LAN-PON diagnostic port sensors.
 
@@ -116,7 +120,20 @@ type: custom:rltech-fttr-ap-table-card
 The AP card uses the same websocket pattern and supports search, sort, and
 filters for online state, profile, model, and uplink. It shows AP inventory
 fields such as alias, MAC, IP, firmware, channels, association count, uplink,
-serial number, and slow-polled AP optical details when enabled.
+serial number, and ONU optical/status details when hardware status polling is
+enabled.
+
+Source ownership is intentionally strict:
+
+- Port `8080` provides AP inventory and station inventory.
+- Port `80` provides OLT runtime/CPU/memory, LAN/LAN-PON status, and ONU/AP
+  optical/status rows.
+- The first port `80` source is the master OLT hardware device. Additional
+  port `80` hosts are represented as separate OLT hardware devices.
+- AP optical/status rows from port `80` are joined to AP inventory by AP serial
+  number, not alias, MAC, or IP.
+- `Reg/Off Time` is exposed with that name. For online ONUs it appears to be
+  registration time; for offline ONUs it appears to be off time.
 
 AP devices and AP sensor unique IDs use the AP hardware serial, for example
 `RLGM3BB8E3D0`. AP rows without an `SN` remain visible as table inventory but
@@ -128,8 +145,8 @@ device uses its AP IP as the Home Assistant configuration URL when available.
 The AP table receives the current HA entity IDs from Home Assistant's entity
 registry; clicking AP-backed cells such as alias, state, profile, or associated
 station count opens the normal HA more-info/history dialog. Other AP fields,
-including channels, uplink details, ONT distance, last PON down/up times, and
-resource details, remain inventory-only table data.
+including channels, uplink details, ONU interface, and source OLT host, remain
+inventory-only table data.
 
 Both table cards accept:
 

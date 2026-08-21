@@ -16,18 +16,15 @@ from homeassistant.helpers.update_coordinator import UpdateFailed
 from .api import AccountBusyError, AuthenticationError, RltechClient
 from .const import (
     CONF_BASE_URL,
-    CONF_AP_DETAIL_INTERVAL,
-    CONF_ENABLE_AP_DETAIL_POLLING,
     CONF_ENABLE_AP_POLLING,
-    CONF_ENABLE_OLT_STATUS,
-    CONF_ENABLE_LAN_PORT_STATUS,
+    CONF_ENABLE_HARDWARE_STATUS,
+    CONF_LEGACY_HOSTS,
+    CONF_LEGACY_PASSWORD,
+    CONF_LEGACY_USERNAME,
     CONF_SCAN_INTERVAL,
     CONF_ENABLE_STATION_POLLING,
-    DEFAULT_AP_DETAIL_INTERVAL,
-    DEFAULT_ENABLE_AP_DETAIL_POLLING,
+    DEFAULT_ENABLE_HARDWARE_STATUS,
     DEFAULT_ENABLE_AP_POLLING,
-    DEFAULT_ENABLE_OLT_STATUS,
-    DEFAULT_ENABLE_LAN_PORT_STATUS,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_ENABLE_STATION_POLLING,
     DEFAULT_STATION_RETENTION,
@@ -77,17 +74,9 @@ class RltechCoordinator(DataUpdateCoordinator[RltechData]):
                 include_station_inventory=self.config_entry.data.get(
                     CONF_ENABLE_STATION_POLLING, DEFAULT_ENABLE_STATION_POLLING
                 ),
-                include_olt_status=self.config_entry.data.get(
-                    CONF_ENABLE_OLT_STATUS, DEFAULT_ENABLE_OLT_STATUS
-                ),
-                include_lan_port_status=self.config_entry.data.get(
-                    CONF_ENABLE_LAN_PORT_STATUS, DEFAULT_ENABLE_LAN_PORT_STATUS
-                ),
-                include_ap_details=self.config_entry.data.get(
-                    CONF_ENABLE_AP_DETAIL_POLLING, DEFAULT_ENABLE_AP_DETAIL_POLLING
-                ),
-                ap_detail_interval=self.config_entry.data.get(
-                    CONF_AP_DETAIL_INTERVAL, DEFAULT_AP_DETAIL_INTERVAL
+                include_hardware_status=self.config_entry.data.get(
+                    CONF_ENABLE_HARDWARE_STATUS,
+                    DEFAULT_ENABLE_HARDWARE_STATUS,
                 ),
                 scan_interval=self.config_entry.data.get(
                     CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
@@ -110,9 +99,36 @@ class RltechCoordinator(DataUpdateCoordinator[RltechData]):
 
 def build_client(entry: ConfigEntry) -> RltechClient:
     """Build an API client from a config entry."""
+    base_url = entry.data[CONF_BASE_URL]
+    legacy_hosts = _legacy_hosts_from_entry(entry)
     return RltechClient(
-        entry.data[CONF_BASE_URL],
+        base_url,
         entry.data[CONF_USERNAME],
         entry.data[CONF_PASSWORD],
+        legacy_base_urls=legacy_hosts,
+        legacy_username=entry.data.get(CONF_LEGACY_USERNAME, "admin"),
+        legacy_password=entry.data.get(CONF_LEGACY_PASSWORD, "admin"),
     )
+
+
+def _legacy_hosts_from_entry(entry: ConfigEntry) -> list[str]:
+    """Return legacy port-80 URLs for the master plus optional slave hosts."""
+    from urllib.parse import urlsplit
+
+    base_url = entry.data[CONF_BASE_URL]
+    parsed = urlsplit(base_url)
+    host = parsed.hostname or parsed.netloc.split(":", 1)[0] or base_url
+    hosts = [host]
+    extra_hosts = entry.data.get(CONF_LEGACY_HOSTS, "")
+    for item in str(extra_hosts).replace("\n", ",").split(","):
+        item = item.strip()
+        if not item:
+            continue
+        if "://" in item:
+            item = urlsplit(item).hostname or item
+        elif ":" in item and item.rsplit(":", 1)[1].isdigit():
+            item = item.rsplit(":", 1)[0]
+        if item not in hosts:
+            hosts.append(item)
+    return [f"http://{item}" for item in hosts]
 

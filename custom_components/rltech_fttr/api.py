@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import ast
 from collections.abc import Iterable, Sequence
 from dataclasses import asdict, replace
 from datetime import UTC, datetime, timedelta
@@ -12,6 +13,7 @@ import logging
 import re
 import time
 from typing import Any
+from urllib.parse import urlencode, urlsplit, urlunsplit
 import zlib
 
 try:
@@ -23,6 +25,7 @@ from .models import (
     RltechAp,
     RltechApDetail,
     RltechData,
+    RltechLegacyOltSource,
     RltechLanPonPort,
     RltechLanPort,
     RltechOltStatus,
@@ -69,6 +72,10 @@ class SessionExpired(RltechError):
 
 class UnexpectedResponse(RltechError):
     """The device returned an unexpected response."""
+
+
+class LegacyAuthenticationError(RltechError):
+    """The legacy port-80 UI rejected credentials."""
 
 
 def eboo_value(fields: Sequence[tuple[str, str]]) -> str:
@@ -659,6 +666,179 @@ def parse_lanpon_ports(text: str) -> dict[int, RltechLanPonPort]:
     return ports
 
 
+def normalize_sn(value: Any) -> str | None:
+    """Normalize RLTech AP/ONU serials for joining across Web UIs."""
+    text = _text(value)
+    if text is None:
+        return None
+    clean = re.sub(r"[^0-9A-Za-z]", "", text).upper()
+    return clean or None
+
+
+def _parse_js_call_args(text: str, function_name: str) -> list[tuple[Any, ...]]:
+    """Parse simple JavaScript function call argument lists."""
+    rows: list[tuple[Any, ...]] = []
+    for args_text in re.findall(
+        rf"(?<!function\s)\b{re.escape(function_name)}\s*\((.*?)\)\s*;",
+        text,
+        re.S,
+    ):
+        try:
+            parsed = ast.literal_eval("(" + args_text.strip() + ",)")
+        except (SyntaxError, ValueError):
+            continue
+        if isinstance(parsed, tuple):
+            rows.append(parsed)
+    return rows
+
+
+def parse_legacy_runinfo(text: str, *, now: datetime | None = None) -> RltechOltStatus:
+    """Parse OLT hardware status from the legacy runinfo.asp page."""
+    now = now or datetime.now(UTC)
+    for row in _parse_js_call_args(text, "X"):
+        if len(row) != 12 or str(row[0]) == "ProName":
+            continue
+        system_uptime = _none_if_na(row[8])
+        duration = _duration(system_uptime)
+        return RltechOltStatus(
+            system_uptime=system_uptime,
+            last_boot=now - duration if duration is not None else None,
+            gateway_type=_none_if_na(row[0]),
+            cpu_usage=_float(row[9]),
+            memory_usage=_float(row[10]),
+            manufacturer="RLTech",
+            serial_number=_none_if_na(row[11]),
+            software_version=_none_if_na(row[1]),
+        )
+    raise UnexpectedResponse("runinfo.asp contains no OLT status row")
+
+
+def parse_legacy_lan_ports(text: str) -> dict[int, RltechLanPort]:
+    """Parse LAN link rows from the legacy lan_info.asp page."""
+    ports: dict[int, RltechLanPort] = {}
+    for row in _parse_js_call_args(text, "showPortInfo"):
+        if len(row) != 6:
+            continue
+        label = _none_if_na(row[0])
+        if label is None:
+            continue
+        port = _legacy_port_number(label)
+        connected = str(row[1]).strip() == "1"
+        mode = _none_if_na(row[2])
+        if mode == "Full":
+            mode = "Full-Duplex"
+        elif mode == "Half":
+            mode = "Half-Duplex"
+        ports[port] = RltechLanPort(
+            port=port,
+            label=label,
+            status="connected" if connected else "disconnected",
+            connected=connected,
+            rate=_none_if_na(row[3]),
+            mode=mode,
+            tx_bytes=_int(row[4]),
+            rx_bytes=_int(row[5]),
+        )
+    return ports
+
+
+def parse_legacy_lanpon_ports(text: str) -> dict[int, RltechLanPonPort]:
+    """Parse LAN-PON optical rows from the legacy lanpon_info.asp page."""
+    ports: dict[int, RltechLanPonPort] = {}
+    for row in _parse_js_call_args(text, "showLANPonInfo"):
+        if len(row) != 10:
+            continue
+        label = _none_if_na(row[0])
+        if label is None:
+            continue
+        ponid = _legacy_pon_number(label)
+        if ponid is None:
+            continue
+        ports[ponid] = RltechLanPonPort(
+            ponid=ponid,
+            status=_none_if_na(row[4]),
+            active=_none_if_na(row[2]),
+            fec=_none_if_na(row[1]),
+            autoregister=_none_if_na(row[3]),
+            tx_power=_float(_strip_units(row[5])),
+            rx_power=_float(_strip_units(row[6])),
+            temperature=_float(_strip_units(row[7])),
+            voltage=_float(_strip_units(row[8])),
+            current=_float(_strip_units(row[9])),
+        )
+    return ports
+
+
+def parse_legacy_onu_mgmt(text: str, *, source_host: str | None = None) -> dict[str, RltechApDetail]:
+    """Parse AP/ONU optical rows from the legacy onu_mgmt.asp page."""
+    rows: dict[str, RltechApDetail] = {}
+    for row in _parse_js_call_args(text, "R"):
+        if len(row) != 8:
+            continue
+        sn = normalize_sn(row[1])
+        if sn is None:
+            continue
+        tx_power, rx_power = _legacy_optical_pair(row[3])
+        interface = _none_if_na(row[0])
+        pon_id = onu_id = None
+        if interface:
+            parts = [_int(part) for part in interface.split("/")]
+            if len(parts) > 1:
+                pon_id = parts[1]
+            if len(parts) > 2:
+                onu_id = parts[2]
+        rows[sn] = RltechApDetail(
+            sn=sn,
+            pon_sn=sn,
+            interface=interface,
+            pon_id=pon_id,
+            onu_id=onu_id,
+            optical_tx_power=tx_power,
+            optical_rx_power=rx_power,
+            onu_status=_none_if_na(row[4]),
+            register_status=_none_if_na(row[5]),
+            reg_off_time=_none_if_na(row[2]),
+            last_down_cause=_none_if_na(row[7]),
+            source_host=source_host,
+        )
+    return rows
+
+
+def _legacy_port_number(label: str) -> int:
+    if match := re.fullmatch(r"LANPON(\d+)", label, re.I):
+        return 4 + int(match.group(1))
+    if match := re.fullmatch(r"LAN-(\d+)", label, re.I):
+        return int(match.group(1))
+    return _int(label) or 0
+
+
+def _legacy_pon_number(label: str) -> int | None:
+    if match := re.fullmatch(r"LANPON(\d+)", label, re.I):
+        return int(match.group(1))
+    return _int(label)
+
+
+def _strip_units(value: Any) -> str | None:
+    text = _text(value)
+    if text is None:
+        return None
+    return (
+        text.replace("dBm", "")
+        .replace("℃", "")
+        .replace("mA", "")
+        .replace("V", "")
+        .strip()
+    )
+
+
+def _legacy_optical_pair(value: Any) -> tuple[float | None, float | None]:
+    text = _text(value)
+    if text is None or "/" not in text or text.upper() == "N/A":
+        return None, None
+    tx_text, rx_text = text.split("/", 1)
+    return _float(_strip_units(tx_text)), _float(_strip_units(rx_text))
+
+
 def normalize_snapshot(
     ap_payloads: Iterable[dict[str, Any]],
     station_payloads: Iterable[dict[str, Any]],
@@ -713,6 +893,45 @@ def normalize_snapshot(
     )
 
 
+def _join_legacy_ap_details(
+    aps: dict[str, RltechAp],
+    details_by_sn: dict[str, RltechApDetail],
+    previous: RltechData | None,
+    *,
+    now: datetime,
+) -> dict[str, RltechApDetail]:
+    """Join legacy ONU rows to managed APs by AP serial."""
+    joined = {
+        mac: detail
+        for mac, detail in (previous.ap_details if previous is not None else {}).items()
+        if mac in aps
+    }
+    for mac, ap in aps.items():
+        sn = normalize_sn(ap.sn)
+        if sn is None:
+            continue
+        detail = details_by_sn.get(sn)
+        if detail is None:
+            continue
+        joined[mac] = replace(
+            detail,
+            mac=mac,
+            ip=ap.ip,
+            model=ap.model,
+            version=ap.version,
+            online=ap.online,
+            profile=ap.profile,
+            alias=ap.alias,
+            sn=ap.sn,
+            dev_sn=ap.dev_sn,
+            uplink=ap.uplink,
+            uplink_port=ap.uplink_port,
+            assoc_count=ap.assoc_count,
+            last_update=now,
+        )
+    return joined
+
+
 class RltechClient:
     """Minimal async client for the RLTech OLT Web UI."""
 
@@ -722,11 +941,17 @@ class RltechClient:
         username: str,
         password: str,
         *,
+        legacy_base_urls: Sequence[str] | None = None,
+        legacy_username: str | None = None,
+        legacy_password: str | None = None,
         timeout: int = 10,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.username = username
         self.password = password
+        self.legacy_base_urls = [url.rstrip("/") for url in legacy_base_urls or []]
+        self.legacy_username = legacy_username or ""
+        self.legacy_password = legacy_password or ""
         self.timeout = timeout
         self.token: str | None = None
         self._lock = asyncio.Lock()
@@ -1072,6 +1297,193 @@ class RltechClient:
             details[ap.mac] = replace(detail, last_update=now)
         return details
 
+    async def legacy_login(self, session: Any, base_url: str, ltime: int) -> None:
+        """Log into the legacy port-80 UI."""
+        fields = {
+            "ltime": str(ltime),
+            "interval": "0",
+            "lang": "en",
+            "role": "15",
+            "word": self.legacy_username,
+            "code": self.legacy_password,
+        }
+        async with session.post(
+            f"{base_url}/goform/setLoginCfg",
+            data=fields,
+            headers=self._legacy_headers(base_url, ltime, f"{base_url}/login_en.asp"),
+            allow_redirects=False,
+            timeout=_client_timeout(self.timeout),
+        ) as response:
+            text = await response.text(errors="replace")
+            location = response.headers.get("Location", "")
+            if response.status not in {200, 302}:
+                raise LegacyAuthenticationError(f"legacy login HTTP status {response.status}")
+            if "error=1" in location or "error=1" in text:
+                raise LegacyAuthenticationError("legacy username/password rejected")
+
+    async def legacy_logout(self, session: Any, base_url: str, ltime: int) -> None:
+        """Log out of the legacy port-80 UI."""
+        fields = {
+            "ltime": str(ltime),
+            "language": "en",
+        }
+        async with session.post(
+            f"{base_url}/goform/setLogoutCfg",
+            data=fields,
+            headers=self._legacy_headers(base_url, ltime, f"{base_url}/top.asp?ltime={ltime}"),
+            allow_redirects=False,
+            timeout=_client_timeout(self.timeout),
+        ) as response:
+            await response.read()
+
+    async def legacy_fetch_html(
+        self,
+        session: Any,
+        base_url: str,
+        ltime: int,
+        path: str,
+    ) -> str:
+        """Fetch one legacy port-80 page."""
+        async with session.get(
+            f"{base_url}{path}",
+            headers=self._legacy_headers(base_url, ltime, f"{base_url}/index.asp"),
+            allow_redirects=False,
+            timeout=_client_timeout(self.timeout),
+        ) as response:
+            text = await response.text(errors="replace")
+            if 300 <= response.status < 400:
+                raise SessionExpired(
+                    f"legacy request redirected to {response.headers.get('Location')}"
+                )
+            if response.status != 200:
+                raise UnexpectedResponse(f"legacy HTTP status {response.status}")
+        return text
+
+    def _legacy_headers(self, base_url: str, ltime: int, referer: str) -> dict[str, str]:
+        return {
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Cookie": f"ltime={ltime}; interval=0; role=15",
+            "Origin": base_url,
+            "Referer": referer,
+            "User-Agent": "Mozilla/5.0",
+        }
+
+    async def _fetch_legacy_source(
+        self,
+        session: Any,
+        base_url: str,
+        *,
+        now: datetime,
+    ) -> tuple[RltechOltStatus, dict[int, RltechLanPort], dict[int, RltechLanPonPort], dict[str, RltechApDetail]]:
+        """Fetch one complete legacy port-80 source."""
+        ltime = int(time.time())
+        await self.legacy_login(session, base_url, ltime)
+        try:
+            runinfo_html = await self.legacy_fetch_html(
+                session, base_url, ltime, f"/runinfo.asp?ltime={ltime}"
+            )
+            lan_html = await self.legacy_fetch_html(
+                session, base_url, ltime, f"/lan_info.asp?ltime={ltime}"
+            )
+            lanpon_html = await self.legacy_fetch_html(
+                session, base_url, ltime, f"/lanpon_info.asp?ltime={ltime}"
+            )
+            onu_details = await self._fetch_legacy_onu_details(session, base_url, ltime)
+            return (
+                parse_legacy_runinfo(runinfo_html, now=now),
+                parse_legacy_lan_ports(lan_html),
+                parse_legacy_lanpon_ports(lanpon_html),
+                onu_details,
+            )
+        finally:
+            try:
+                await asyncio.shield(self.legacy_logout(session, base_url, ltime))
+            except Exception as err:  # noqa: BLE001 - legacy logout should not poison data
+                _LOGGER.warning("RLTech legacy logout cleanup failed for %s: %s", base_url, err)
+
+    async def _fetch_legacy_onu_details(
+        self,
+        session: Any,
+        base_url: str,
+        ltime: int,
+    ) -> dict[str, RltechApDetail]:
+        """Fetch all legacy ONU pages from one source."""
+        details: dict[str, RltechApDetail] = {}
+        for page in range(1, 21):
+            html_text = await self.legacy_fetch_html(
+                session,
+                base_url,
+                ltime,
+                f"/onu_mgmt.asp?{urlencode({'page': page, 'port_id': 0, 'ltime': ltime})}",
+            )
+            page_details = parse_legacy_onu_mgmt(
+                html_text,
+                source_host=urlsplit(base_url).hostname or base_url,
+            )
+            if not page_details:
+                break
+            details.update(page_details)
+        return details
+
+    async def _fetch_legacy_snapshot(
+        self,
+        session: Any,
+        aps: dict[str, RltechAp],
+        previous: RltechData | None,
+        *,
+        now: datetime,
+    ) -> tuple[
+        RltechOltStatus | None,
+        dict[int, RltechLanPort],
+        dict[int, RltechLanPonPort],
+        dict[str, RltechApDetail],
+        dict[str, RltechLegacyOltSource],
+    ]:
+        """Fetch and merge all configured legacy port-80 sources."""
+        if not self.legacy_base_urls:
+            return None, {}, {}, {}, {}
+        olt_status = None
+        lan_ports: dict[int, RltechLanPort] = {}
+        lanpon_ports: dict[int, RltechLanPonPort] = {}
+        by_sn: dict[str, RltechApDetail] = {}
+        sources: dict[str, RltechLegacyOltSource] = {}
+        source_error = False
+        for index, base_url in enumerate(self.legacy_base_urls):
+            host = urlsplit(base_url).hostname or base_url
+            try:
+                source_status, source_lan, source_lanpon, source_onus = (
+                    await self._fetch_legacy_source(session, base_url, now=now)
+                )
+            except Exception as err:  # noqa: BLE001 - keep other source / last good values
+                source_error = True
+                _LOGGER.warning("Unable to fetch RLTech legacy status from %s: %s", base_url, err)
+                continue
+            if index == 0:
+                olt_status = source_status
+                lan_ports = source_lan
+                lanpon_ports = source_lanpon
+            sources[host] = RltechLegacyOltSource(
+                host=host,
+                base_url=base_url,
+                olt_status=source_status,
+                lan_ports=source_lan,
+                lanpon_ports=source_lanpon,
+            )
+            by_sn.update(source_onus)
+
+        if source_error and previous is not None:
+            olt_status = olt_status or previous.olt_status
+            if not lan_ports:
+                lan_ports = previous.lan_ports
+            if not lanpon_ports:
+                lanpon_ports = previous.lanpon_ports
+            for host, source in previous.legacy_sources.items():
+                sources.setdefault(host, source)
+
+        ap_details = _join_legacy_ap_details(aps, by_sn, previous, now=now)
+        return olt_status, lan_ports, lanpon_ports, ap_details, sources
+
     async def fetch_snapshot(
         self,
         session: Any,
@@ -1080,10 +1492,7 @@ class RltechClient:
         station_retention: int = 3600,
         include_ap_inventory: bool = True,
         include_station_inventory: bool = True,
-        include_olt_status: bool = True,
-        include_lan_port_status: bool = True,
-        include_ap_details: bool = True,
-        ap_detail_interval: int = 600,
+        include_hardware_status: bool = True,
         scan_interval: int = 60,
     ) -> RltechData:
         """Run one serialized login/fetch/logout transaction."""
@@ -1107,40 +1516,37 @@ class RltechClient:
                     else []
                 )
                 now = datetime.now(UTC)
-                ap_details = (
-                    await self._fetch_due_ap_details(
-                        session,
-                        aps,
-                        previous,
-                        now=now,
-                        scan_interval=scan_interval,
-                        detail_interval=ap_detail_interval,
+                olt_status = None
+                lan_ports: dict[int, RltechLanPort] = {}
+                lanpon_ports: dict[int, RltechLanPonPort] = {}
+                ap_details: dict[str, RltechApDetail] = {}
+                legacy_sources: dict[str, RltechLegacyOltSource] = {}
+                if include_hardware_status:
+                    olt_status, lan_ports, lanpon_ports, ap_details, legacy_sources = (
+                        await self._fetch_legacy_snapshot(
+                            session,
+                            aps,
+                            previous,
+                            now=now,
+                        )
                     )
-                    if include_ap_details and include_ap_inventory
-                    else {
-                        mac: detail
-                        for mac, detail in (
-                            previous.ap_details if previous is not None else {}
-                        ).items()
-                        if mac in aps
-                    }
-                )
-                olt_html = None
-                user_html = None
-                if include_olt_status:
-                    olt_html = await self.fetch_device_html(session)
-                if include_lan_port_status:
-                    user_html = await self.fetch_user_html(session)
-                return normalize_snapshot(
+                data = normalize_snapshot(
                     ap_pages,
                     station_pages,
-                    olt_html=olt_html,
-                    user_html=user_html,
+                    olt_html=None,
+                    user_html=None,
                     previous=previous,
                     now=now,
                     station_retention=station_retention if include_station_inventory else 0,
                     poll_duration_ms=int((time.monotonic() - started) * 1000),
                     ap_details=ap_details,
+                )
+                return replace(
+                    data,
+                    olt_status=_stabilize_olt_status(olt_status, previous),
+                    lan_ports=lan_ports,
+                    lanpon_ports=lanpon_ports,
+                    legacy_sources=legacy_sources,
                 )
             except Exception as exc:
                 primary_error = exc

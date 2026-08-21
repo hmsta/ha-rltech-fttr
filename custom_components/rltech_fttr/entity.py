@@ -24,6 +24,11 @@ class RltechEntity(CoordinatorEntity[RltechCoordinator]):
         super().__init__(coordinator)
         self.config_entry = entry
 
+    @property
+    def available(self) -> bool:
+        """Keep last known values visible across temporary poll failures."""
+        return self.coordinator.data is not None
+
 
 def _base_url_to_host(value: str) -> str:
     """Return the host portion of a normalized base URL."""
@@ -46,6 +51,27 @@ def controller_device_info(
         sw_version=status.software_version if status else None,
         serial_number=status.serial_number if status else None,
         configuration_url=base_url,
+    )
+
+
+def legacy_olt_device_info(
+    entry: ConfigEntry,
+    host: str,
+    status: RltechOltStatus | None = None,
+    *,
+    via_controller: bool = True,
+) -> DeviceInfo:
+    """Return device info for an additional legacy port-80 OLT source."""
+    return DeviceInfo(
+        identifiers={(DOMAIN, f"{entry.entry_id}_legacy_olt_{host}")},
+        manufacturer=status.manufacturer if status and status.manufacturer else "RLTech",
+        name=f"RLTech OLT {host}",
+        model=status.gateway_type if status else None,
+        hw_version=status.hardware_version if status else None,
+        sw_version=status.software_version if status else None,
+        serial_number=status.serial_number if status else None,
+        configuration_url=f"http://{host}",
+        via_device=(DOMAIN, entry.entry_id) if via_controller else None,
     )
 
 

@@ -11,10 +11,8 @@ AP_SENSOR_KEYS = (
     "alias",
     "optical_rx_power",
     "optical_tx_power",
-    "downstream_optical_rx_power",
-    "optical_temperature",
-    "optical_voltage",
-    "optical_current",
+    "reg_off_time",
+    "last_down_cause",
 )
 
 

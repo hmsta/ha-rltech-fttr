@@ -76,6 +76,10 @@ class RltechApDetail:
     last_down_time: str | None = None
     last_dying_gasp_time: str | None = None
     last_down_cause: str | None = None
+    reg_off_time: str | None = None
+    interface: str | None = None
+    source_host: str | None = None
+    register_status: str | None = None
     identify_vendor: str | None = None
     equipment_id: str | None = None
     sn_address: str | None = None
@@ -177,6 +181,17 @@ class RltechLanPonPort:
 
 
 @dataclass(frozen=True)
+class RltechLegacyOltSource:
+    """One legacy port-80 OLT hardware/status source."""
+
+    host: str
+    base_url: str
+    olt_status: RltechOltStatus | None = None
+    lan_ports: dict[int, RltechLanPort] = field(default_factory=dict)
+    lanpon_ports: dict[int, RltechLanPonPort] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class RltechData:
     """Complete normalized coordinator snapshot."""
 
@@ -186,5 +201,6 @@ class RltechData:
     olt_status: RltechOltStatus | None = None
     lan_ports: dict[int, RltechLanPort] = field(default_factory=dict)
     lanpon_ports: dict[int, RltechLanPonPort] = field(default_factory=dict)
+    legacy_sources: dict[str, RltechLegacyOltSource] = field(default_factory=dict)
     last_success: datetime | None = None
     poll_duration_ms: int | None = None

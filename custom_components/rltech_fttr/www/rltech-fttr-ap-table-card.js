@@ -99,21 +99,12 @@ class RltechFttrApTableCard extends HTMLElement {
       ["upgrade_flag", "Upgrade"],
       ["optical_rx_power", "Rx dBm", null, null, "optical_rx_power"],
       ["optical_tx_power", "Tx dBm", null, null, "optical_tx_power"],
-      ["downstream_optical_rx_power", "Down RX dBm", null, null, "downstream_optical_rx_power"],
-      ["optical_temperature", "Optical temp", null, null, "optical_temperature"],
-      ["optical_voltage", "Optical voltage", null, null, "optical_voltage"],
-      ["optical_current", "Optical current", null, null, "optical_current"],
-      ["ont_distance", "ONT distance"],
-      ["last_down_cause", "Last down cause"],
-      ["last_up_time", "Last up"],
-      ["last_down_time", "Last down"],
-      ["last_dying_gasp_time", "Last dying gasp"],
-      ["detail_last_update", "Detail update"],
-      ["cpu_usage", "CPU usage"],
-      ["cpu_temperature", "CPU temp"],
-      ["memory_usage", "Memory usage"],
-      ["flash_usage", "Flash usage"],
-      ["sys_duration", "Sys duration"],
+      ["reg_off_time", "Reg/Off Time", null, null, "reg_off_time"],
+      ["last_down_cause", "Off reason", null, null, "last_down_cause"],
+      ["onu_status", "ONU status"],
+      ["interface", "ONU interface"],
+      ["source_host", "ONU source"],
+      ["detail_last_update", "ONU update"],
     ].map(([key, label, render, sort, entityKey]) => ({
       key,
       label,
@@ -128,7 +119,7 @@ class RltechFttrApTableCard extends HTMLElement {
   }
 
   _defaultMobileColumns() {
-    return ["alias", "ip", "online", "assoc_count", "channel_24", "channel_5", "details"];
+    return ["alias", "ip", "online", "assoc_count", "details"];
   }
 
   _activeColumns() {

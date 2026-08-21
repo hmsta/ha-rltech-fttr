@@ -17,26 +17,24 @@ from .api import AccountBusyError, AuthenticationError, RltechClient
 from .const import (
     CONF_BASE_URL,
     CONF_ENABLE_AP_POLLING,
-    CONF_ENABLE_AP_DETAIL_POLLING,
-    CONF_ENABLE_OLT_STATUS,
-    CONF_ENABLE_LAN_PORT_STATUS,
-    CONF_AP_DETAIL_INTERVAL,
+    CONF_ENABLE_HARDWARE_STATUS,
+    CONF_LEGACY_HOSTS,
+    CONF_LEGACY_PASSWORD,
+    CONF_LEGACY_USERNAME,
     CONF_AP_AREA_ID,
     CONF_SCAN_INTERVAL,
     CONF_ENABLE_STATION_POLLING,
     DEFAULT_BASE_URL,
     DEFAULT_USERNAME,
-    DEFAULT_AP_DETAIL_INTERVAL,
-    DEFAULT_ENABLE_AP_DETAIL_POLLING,
+    DEFAULT_ENABLE_HARDWARE_STATUS,
     DEFAULT_ENABLE_AP_POLLING,
-    DEFAULT_ENABLE_OLT_STATUS,
-    DEFAULT_ENABLE_LAN_PORT_STATUS,
+    DEFAULT_LEGACY_PASSWORD,
+    DEFAULT_LEGACY_USERNAME,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_ENABLE_STATION_POLLING,
     DEFAULT_STATION_RETENTION,
     DOMAIN,
     MIN_SCAN_INTERVAL,
-    MIN_AP_DETAIL_INTERVAL,
     CONF_STATION_RETENTION,
 )
 
@@ -119,27 +117,21 @@ def _schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
                 ),
             ): bool,
             vol.Optional(
-                CONF_ENABLE_OLT_STATUS,
-                default=defaults.get(CONF_ENABLE_OLT_STATUS, DEFAULT_ENABLE_OLT_STATUS),
-            ): bool,
-            vol.Optional(
-                CONF_ENABLE_LAN_PORT_STATUS,
+                CONF_ENABLE_HARDWARE_STATUS,
                 default=defaults.get(
-                    CONF_ENABLE_LAN_PORT_STATUS, DEFAULT_ENABLE_LAN_PORT_STATUS
+                    CONF_ENABLE_HARDWARE_STATUS,
+                    defaults.get("enable_olt_status", DEFAULT_ENABLE_HARDWARE_STATUS),
                 ),
             ): bool,
             vol.Optional(
-                CONF_ENABLE_AP_DETAIL_POLLING,
-                default=defaults.get(
-                    CONF_ENABLE_AP_DETAIL_POLLING, DEFAULT_ENABLE_AP_DETAIL_POLLING
-                ),
-            ): bool,
+                CONF_LEGACY_USERNAME,
+                default=defaults.get(CONF_LEGACY_USERNAME, DEFAULT_LEGACY_USERNAME),
+            ): str,
+            vol.Optional(CONF_LEGACY_PASSWORD): password_selector,
             vol.Optional(
-                CONF_AP_DETAIL_INTERVAL,
-                default=defaults.get(
-                    CONF_AP_DETAIL_INTERVAL, DEFAULT_AP_DETAIL_INTERVAL
-                ),
-            ): vol.All(vol.Coerce(int), vol.Range(min=MIN_AP_DETAIL_INTERVAL)),
+                CONF_LEGACY_HOSTS,
+                default=defaults.get(CONF_LEGACY_HOSTS, ""),
+            ): str,
             ap_area_key: selector.AreaSelector(),
         }
     )
@@ -172,6 +164,8 @@ class RltechConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             user_input[CONF_BASE_URL] = _host_to_base_url(user_input[CONF_BASE_URL])
+            if not user_input.get(CONF_LEGACY_PASSWORD):
+                user_input[CONF_LEGACY_PASSWORD] = DEFAULT_LEGACY_PASSWORD
             unique_id = user_input[CONF_BASE_URL].rstrip("/")
             await self.async_set_unique_id(unique_id)
             self._abort_if_unique_id_configured()
@@ -210,6 +204,12 @@ class RltechConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     key: value
                     for key, value in user_input.items()
                     if key != CONF_PASSWORD
+                }
+            if not user_input.get(CONF_LEGACY_PASSWORD):
+                user_input = {
+                    key: value
+                    for key, value in user_input.items()
+                    if key != CONF_LEGACY_PASSWORD
                 }
             data = {**entry.data, **user_input}
             unique_id = data[CONF_BASE_URL].rstrip("/")

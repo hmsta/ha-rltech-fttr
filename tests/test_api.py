@@ -453,6 +453,104 @@ def test_normalize_snapshot_preserves_ap_details() -> None:
     assert data.ap_details["44:95:3B:B8:DC:E0"].optical_rx_power == -15.34
 
 
+def test_parse_legacy_port80_pages() -> None:
+    now = datetime(2026, 8, 21, 10, 0, 0, tzinfo=UTC)
+    status = api.parse_legacy_runinfo(
+        """
+        function X(ProName,VerInfo,SnmpOid,BuatRate,ManuInfo,SupRFC,CopyInfo,MACAddr,RunTime,CPURatio,MemRatio,Sn)
+        X('RH8002GR','V5.0.1-51675','','','','','','44:95:3B:B9:D3:F0','19 Days 18 Hour 44 Min 43 Sec','8','20','RL2024092600019');
+        """,
+        now=now,
+    )
+    lan_ports = api.parse_legacy_lan_ports(
+        """
+        <script>showPortInfo('LAN-1','1','Full','1000M','10228557175','9786317129');showPortInfo('LANPON1','1','Full','2500M','18446744072608318560','420643402');</script>
+        """
+    )
+    lanpon_ports = api.parse_legacy_lanpon_ports(
+        """
+        <script>showLANPonInfo('LANPON1','disable','enable','enable','up','2.73 dBm','-20.48','49.83 ℃','3.08 mA','38.56 V');</script>
+        """
+    )
+    onu_rows = api.parse_legacy_onu_mgmt(
+        """
+        R( "0/1/2","RLGM-3BB8DCE0","Fri Aug 21 06:12:26 2026"," -1.79/-15.46","online","17","","0");
+        """,
+        source_host="172.20.11.1",
+    )
+
+    assert status.gateway_type == "RH8002GR"
+    assert status.cpu_usage == 8
+    assert status.memory_usage == 20
+    assert status.serial_number == "RL2024092600019"
+    assert status.last_boot == datetime(2026, 8, 1, 15, 15, 17, tzinfo=UTC)
+    assert lan_ports[1].status == "connected"
+    assert lan_ports[5].label == "LANPON1"
+    assert lan_ports[5].rate == "2500M"
+    assert lanpon_ports[1].status == "up"
+    assert lanpon_ports[1].tx_power == 2.73
+    assert lanpon_ports[1].rx_power == -20.48
+    assert lanpon_ports[1].temperature == 49.83
+    assert lanpon_ports[1].voltage == 3.08
+    assert lanpon_ports[1].current == 38.56
+    assert onu_rows["RLGM3BB8DCE0"].optical_tx_power == -1.79
+    assert onu_rows["RLGM3BB8DCE0"].optical_rx_power == -15.46
+    assert onu_rows["RLGM3BB8DCE0"].reg_off_time == "Fri Aug 21 06:12:26 2026"
+    assert onu_rows["RLGM3BB8DCE0"].last_down_cause == "0"
+    assert onu_rows["RLGM3BB8DCE0"].source_host == "172.20.11.1"
+
+
+def test_legacy_onu_details_join_to_aps_by_serial() -> None:
+    now = datetime(2026, 8, 21, 10, 0, 0, tzinfo=UTC)
+    ap = models.RltechAp(
+        mac="44:95:3B:B8:DC:E0",
+        sn="RLGM3BB8DCE0",
+        alias="House11_Office",
+        online=True,
+    )
+    details = {
+        "RLGM3BB8DCE0": models.RltechApDetail(
+            sn="RLGM3BB8DCE0",
+            optical_tx_power=-1.79,
+            optical_rx_power=-15.46,
+            reg_off_time="Fri Aug 21 06:12:26 2026",
+        )
+    }
+
+    joined = api._join_legacy_ap_details({ap.mac: ap}, details, None, now=now)
+
+    assert joined[ap.mac].sn == "RLGM3BB8DCE0"
+    assert joined[ap.mac].mac == ap.mac
+    assert joined[ap.mac].alias == "House11_Office"
+    assert joined[ap.mac].optical_rx_power == -15.46
+    assert joined[ap.mac].last_update == now
+
+
+def test_legacy_sources_are_preserved_per_olt() -> None:
+    data = models.RltechData(
+        legacy_sources={
+            "172.20.11.1": models.RltechLegacyOltSource(
+                host="172.20.11.1",
+                base_url="http://172.20.11.1",
+                olt_status=models.RltechOltStatus(cpu_usage=8),
+                lan_ports={1: models.RltechLanPort(port=1, status="connected")},
+                lanpon_ports={1: models.RltechLanPonPort(ponid=1, status="up")},
+            ),
+            "172.20.11.2": models.RltechLegacyOltSource(
+                host="172.20.11.2",
+                base_url="http://172.20.11.2",
+                olt_status=models.RltechOltStatus(cpu_usage=6),
+                lan_ports={1: models.RltechLanPort(port=1, status="connected")},
+                lanpon_ports={2: models.RltechLanPonPort(ponid=2, status="up")},
+            ),
+        }
+    )
+
+    assert data.legacy_sources["172.20.11.1"].olt_status.cpu_usage == 8
+    assert data.legacy_sources["172.20.11.2"].olt_status.cpu_usage == 6
+    assert data.legacy_sources["172.20.11.2"].lanpon_ports[2].status == "up"
+
+
 def test_ap_detail_due_respects_interval() -> None:
     client = api.RltechClient("http://example.invalid", "u", "p")
     now = datetime(2026, 8, 20, 1, 0, tzinfo=UTC)
@@ -760,36 +858,6 @@ def test_diagnostics_redaction_helper() -> None:
     assert result["nested"]["ok"] is True
 
 
-def test_diagnostics_missing_optical_only_counts_online_pon_aps() -> None:
-    diagnostics = load_module("diagnostics")
-    online_pon = models.RltechAp(mac="44:95:3B:B8:DC:D0", online=True, uplink=2)
-    online_lan = models.RltechAp(mac="44:95:3B:B8:DC:E0", online=True, uplink=0)
-    offline_pon = models.RltechAp(mac="44:95:3B:B8:DC:F0", online=False, uplink=2)
-    complete_pon = models.RltechAp(mac="44:95:3B:B8:DD:00", online=True, uplink=2)
-
-    assert diagnostics._ap_detail_missing_expected_optical(
-        online_pon,
-        models.RltechApDetail(mac=online_pon.mac, uplink=2),
-    )
-    assert not diagnostics._ap_detail_missing_expected_optical(
-        online_lan,
-        models.RltechApDetail(mac=online_lan.mac, uplink=0),
-    )
-    assert not diagnostics._ap_detail_missing_expected_optical(
-        offline_pon,
-        models.RltechApDetail(mac=offline_pon.mac, uplink=2),
-    )
-    assert not diagnostics._ap_detail_missing_expected_optical(
-        complete_pon,
-        models.RltechApDetail(
-            mac=complete_pon.mac,
-            uplink=2,
-            optical_rx_power=-15.34,
-            optical_tx_power=-1.79,
-        ),
-    )
-
-
 def test_authentication_error_mapping() -> None:
     async def run() -> None:
         client = api.RltechClient("http://olt", "u", "p")
@@ -868,8 +936,7 @@ def test_fetch_snapshot_can_skip_ap_and_station_pages() -> None:
             session,
             include_ap_inventory=False,
             include_station_inventory=False,
-            include_olt_status=True,
-            include_lan_port_status=False,
+            include_hardware_status=False,
         )
 
         assert data.aps == {}

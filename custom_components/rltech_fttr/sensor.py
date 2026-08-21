@@ -26,12 +26,17 @@ from homeassistant.util import slugify
 
 from .const import (
     CONF_AP_AREA_ID,
-    CONF_ENABLE_AP_DETAIL_POLLING,
-    DEFAULT_ENABLE_AP_DETAIL_POLLING,
+    CONF_ENABLE_HARDWARE_STATUS,
+    DEFAULT_ENABLE_HARDWARE_STATUS,
     DOMAIN,
 )
 from .coordinator import RltechCoordinator
-from .entity import RltechEntity, ap_device_info, controller_device_info
+from .entity import (
+    RltechEntity,
+    ap_device_info,
+    controller_device_info,
+    legacy_olt_device_info,
+)
 from .identifiers import ap_sensor_unique_id
 from .models import (
     RltechAp,
@@ -96,15 +101,6 @@ class OltSensorDescription(SensorEntityDescription):
 
 OLT_SENSORS = (
     OltSensorDescription(
-        key="cpu_temperature",
-        translation_key="cpu_temperature",
-        icon="mdi:thermometer",
-        native_unit_of_measurement="°C",
-        device_class=SensorDeviceClass.TEMPERATURE,
-        state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda s: s.cpu_temperature,
-    ),
-    OltSensorDescription(
         key="last_boot",
         translation_key="last_boot",
         icon="mdi:restart",
@@ -112,11 +108,22 @@ OLT_SENSORS = (
         value_fn=lambda s: s.last_boot,
     ),
     OltSensorDescription(
-        key="wan_link_up_since",
-        translation_key="wan_link_up_since",
-        icon="mdi:wan",
-        device_class=SensorDeviceClass.TIMESTAMP,
-        value_fn=lambda s: s.wan_link_up_since,
+        key="cpu_usage",
+        translation_key="cpu_usage",
+        icon="mdi:cpu-64-bit",
+        native_unit_of_measurement="%",
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda s: s.cpu_usage,
+    ),
+    OltSensorDescription(
+        key="memory_usage",
+        translation_key="memory_usage",
+        icon="mdi:memory",
+        native_unit_of_measurement="%",
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda s: s.memory_usage,
     ),
 )
 
@@ -184,43 +191,18 @@ AP_DETAIL_SENSORS = (
         value_fn=lambda detail: detail.optical_tx_power,
     ),
     ApDetailSensorDescription(
-        key="downstream_optical_rx_power",
-        translation_key="ap_downstream_optical_rx_power",
-        icon="mdi:download-network-outline",
-        native_unit_of_measurement="dBm",
-        device_class=SensorDeviceClass.SIGNAL_STRENGTH,
-        state_class=SensorStateClass.MEASUREMENT,
+        key="reg_off_time",
+        translation_key="ap_reg_off_time",
+        icon="mdi:clock-outline",
         entity_category=EntityCategory.DIAGNOSTIC,
-        value_fn=lambda detail: detail.downstream_optical_rx_power,
+        value_fn=lambda detail: detail.reg_off_time,
     ),
     ApDetailSensorDescription(
-        key="optical_temperature",
-        translation_key="ap_optical_temperature",
-        icon="mdi:thermometer",
-        native_unit_of_measurement="°C",
-        device_class=SensorDeviceClass.TEMPERATURE,
-        state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda detail: detail.optical_temperature,
-    ),
-    ApDetailSensorDescription(
-        key="optical_voltage",
-        translation_key="ap_optical_voltage",
-        icon="mdi:flash",
-        native_unit_of_measurement="V",
-        device_class=SensorDeviceClass.VOLTAGE,
-        state_class=SensorStateClass.MEASUREMENT,
+        key="last_down_cause",
+        translation_key="ap_last_off_reason",
+        icon="mdi:alert-circle-outline",
         entity_category=EntityCategory.DIAGNOSTIC,
-        value_fn=lambda detail: detail.optical_voltage,
-    ),
-    ApDetailSensorDescription(
-        key="optical_current",
-        translation_key="ap_optical_current",
-        icon="mdi:current-dc",
-        native_unit_of_measurement="mA",
-        device_class=SensorDeviceClass.CURRENT,
-        state_class=SensorStateClass.MEASUREMENT,
-        entity_category=EntityCategory.DIAGNOSTIC,
-        value_fn=lambda detail: detail.optical_current,
+        value_fn=lambda detail: detail.last_down_cause,
     ),
 )
 
@@ -345,19 +327,17 @@ SENSOR_NAMES = {
     "online_ap_count": "Online AP count",
     "reported_station_count": "Reported station count",
     "poll_duration": "Poll duration",
-    "cpu_temperature": "CPU temperature",
+    "cpu_usage": "CPU usage",
+    "memory_usage": "Memory usage",
     "last_boot": "Last boot",
-    "wan_link_up_since": "WAN link up since",
     "online": "Online",
     "assoc_count": "Associated clients",
     "profile": "Profile",
     "alias": "Alias",
     "optical_rx_power": "Optical RX power",
     "optical_tx_power": "Optical TX power",
-    "downstream_optical_rx_power": "Downstream optical RX power",
-    "optical_temperature": "Optical temperature",
-    "optical_voltage": "Optical voltage",
-    "optical_current": "Optical current",
+    "reg_off_time": "Reg/Off Time",
+    "last_down_cause": "Last off reason",
 }
 
 
@@ -373,15 +353,23 @@ async def async_setup_entry(
         RltechControllerSensor(entry, coordinator, description)
         for description in CONTROLLER_SENSORS
     )
-    entities.extend(
-        RltechOltStatusSensor(entry, coordinator, description)
-        for description in OLT_SENSORS
+    hardware_status_enabled = entry.data.get(
+        CONF_ENABLE_HARDWARE_STATUS,
+        entry.data.get("enable_olt_status", DEFAULT_ENABLE_HARDWARE_STATUS),
     )
+    if hardware_status_enabled:
+        entities.extend(
+            RltechOltStatusSensor(entry, coordinator, description)
+            for description in OLT_SENSORS
+        )
     async_add_entities(entities)
 
     known_aps: set[str] = set()
     known_lan_ports: set[int] = set()
     known_lanpon_ports: set[int] = set()
+    known_legacy_sources: set[str] = set()
+    known_legacy_lan_ports: set[tuple[str, int]] = set()
+    known_legacy_lanpon_ports: set[tuple[str, int]] = set()
 
     @callback
     def add_dynamic_entities() -> None:
@@ -401,30 +389,69 @@ async def async_setup_entry(
                 RltechApSensor(entry, coordinator, mac, description)
                 for description in AP_SENSORS
             )
-            if entry.data.get(
-                CONF_ENABLE_AP_DETAIL_POLLING,
-                DEFAULT_ENABLE_AP_DETAIL_POLLING,
-            ):
+            if hardware_status_enabled:
                 new_entities.extend(
                     RltechApDetailSensor(entry, coordinator, mac, description)
                     for description in AP_DETAIL_SENSORS
                 )
-        for port in coordinator.data.lan_ports:
-            if port in known_lan_ports:
-                continue
-            known_lan_ports.add(port)
-            new_entities.extend(
-                RltechLanPortSensor(entry, coordinator, port, description)
-                for description in LAN_PORT_SENSORS
-            )
-        for ponid in coordinator.data.lanpon_ports:
-            if ponid in known_lanpon_ports:
-                continue
-            known_lanpon_ports.add(ponid)
-            new_entities.extend(
-                RltechLanPonPortSensor(entry, coordinator, ponid, description)
-                for description in LANPON_PORT_SENSORS
-            )
+        if hardware_status_enabled:
+            for port in coordinator.data.lan_ports:
+                if port in known_lan_ports:
+                    continue
+                known_lan_ports.add(port)
+                new_entities.extend(
+                    RltechLanPortSensor(entry, coordinator, port, description)
+                    for description in LAN_PORT_SENSORS
+                )
+            for ponid in coordinator.data.lanpon_ports:
+                if ponid in known_lanpon_ports:
+                    continue
+                known_lanpon_ports.add(ponid)
+                new_entities.extend(
+                    RltechLanPonPortSensor(entry, coordinator, ponid, description)
+                    for description in LANPON_PORT_SENSORS
+                )
+            legacy_hosts = list(coordinator.data.legacy_sources)
+            master_host = legacy_hosts[0] if legacy_hosts else None
+            for host, source in coordinator.data.legacy_sources.items():
+                if host == master_host:
+                    continue
+                if host not in known_legacy_sources:
+                    known_legacy_sources.add(host)
+                    new_entities.extend(
+                        RltechLegacyOltStatusSensor(entry, coordinator, host, description)
+                        for description in OLT_SENSORS
+                    )
+                for port in source.lan_ports:
+                    key = (host, port)
+                    if key in known_legacy_lan_ports:
+                        continue
+                    known_legacy_lan_ports.add(key)
+                    new_entities.extend(
+                        RltechLanPortSensor(
+                            entry,
+                            coordinator,
+                            port,
+                            description,
+                            source_host=host,
+                        )
+                        for description in LAN_PORT_SENSORS
+                    )
+                for ponid in source.lanpon_ports:
+                    key = (host, ponid)
+                    if key in known_legacy_lanpon_ports:
+                        continue
+                    known_legacy_lanpon_ports.add(key)
+                    new_entities.extend(
+                        RltechLanPonPortSensor(
+                            entry,
+                            coordinator,
+                            ponid,
+                            description,
+                            source_host=host,
+                        )
+                        for description in LANPON_PORT_SENSORS
+                    )
         if new_entities:
             async_add_entities(new_entities)
         if new_aps:
@@ -517,6 +544,50 @@ class RltechOltStatusSensor(RltechEntity, SensorEntity):
     def device_info(self):
         status = self.coordinator.data.olt_status if self.coordinator.data else None
         return controller_device_info(self.config_entry, status)
+
+
+class RltechLegacyOltStatusSensor(RltechEntity, SensorEntity):
+    """Hardware status sensor for an additional legacy OLT source."""
+
+    entity_description: OltSensorDescription
+
+    def __init__(
+        self,
+        entry: ConfigEntry,
+        coordinator: RltechCoordinator,
+        host: str,
+        description: OltSensorDescription,
+    ) -> None:
+        super().__init__(entry, coordinator)
+        self._host = host
+        self.entity_description = description
+        self._attr_unique_id = f"{entry.entry_id}_legacy_olt_{host}_{description.key}"
+        self._attr_name = SENSOR_NAMES[description.key]
+        self._attr_suggested_object_id = (
+            f"rltech_olt_{slugify(host)}_{description.key}"
+        )
+
+    @property
+    def native_value(self) -> int | float | str | bool | datetime | None:
+        source = self._source
+        if source is None or source.olt_status is None:
+            return None
+        return self.entity_description.value_fn(source.olt_status)
+
+    @property
+    def device_info(self):
+        source = self._source
+        return legacy_olt_device_info(
+            self.config_entry,
+            self._host,
+            source.olt_status if source else None,
+        )
+
+    @property
+    def _source(self):
+        if self.coordinator.data is None:
+            return None
+        return self.coordinator.data.legacy_sources.get(self._host)
 
 
 class RltechApSensor(RltechEntity, SensorEntity):
@@ -644,16 +715,24 @@ class RltechLanPortSensor(RltechEntity, SensorEntity):
         coordinator: RltechCoordinator,
         port: int,
         description: LanPortSensorDescription,
+        *,
+        source_host: str | None = None,
     ) -> None:
         super().__init__(entry, coordinator)
         self._port = port
+        self._source_host = source_host
         self.entity_description = description
-        self._attr_unique_id = f"{entry.entry_id}_lan_port_{port}_{description.key}"
-        self._attr_device_info = controller_device_info(entry)
+        source_prefix = f"legacy_olt_{source_host}_" if source_host else ""
+        self._attr_unique_id = (
+            f"{entry.entry_id}_{source_prefix}lan_port_{port}_{description.key}"
+        )
         label = f"LANPON{port - 4}" if port > 4 else f"LAN-{port}"
         suffix = LAN_PORT_SUFFIXES[description.key]
         self._attr_name = f"{label} {suffix}"
-        self._attr_suggested_object_id = f"{slugify(label)}_{description.key}"
+        object_prefix = f"rltech_olt_{slugify(source_host)}_" if source_host else ""
+        self._attr_suggested_object_id = (
+            f"{object_prefix}{slugify(label)}_{description.key}"
+        )
 
     @property
     def native_value(self) -> int | float | str | None:
@@ -679,7 +758,25 @@ class RltechLanPortSensor(RltechEntity, SensorEntity):
     def _lan_port(self) -> RltechLanPort | None:
         if self.coordinator.data is None:
             return None
+        if self._source_host:
+            source = self.coordinator.data.legacy_sources.get(self._source_host)
+            return source.lan_ports.get(self._port) if source else None
         return self.coordinator.data.lan_ports.get(self._port)
+
+    @property
+    def device_info(self):
+        if not self._source_host:
+            return controller_device_info(self.config_entry)
+        source = (
+            self.coordinator.data.legacy_sources.get(self._source_host)
+            if self.coordinator.data
+            else None
+        )
+        return legacy_olt_device_info(
+            self.config_entry,
+            self._source_host,
+            source.olt_status if source else None,
+        )
 
 
 class RltechLanPonPortSensor(RltechEntity, SensorEntity):
@@ -693,16 +790,24 @@ class RltechLanPonPortSensor(RltechEntity, SensorEntity):
         coordinator: RltechCoordinator,
         ponid: int,
         description: LanPonPortSensorDescription,
+        *,
+        source_host: str | None = None,
     ) -> None:
         super().__init__(entry, coordinator)
         self._ponid = ponid
+        self._source_host = source_host
         self.entity_description = description
-        self._attr_unique_id = f"{entry.entry_id}_lanpon_port_{ponid}_{description.key}"
-        self._attr_device_info = controller_device_info(entry)
+        source_prefix = f"legacy_olt_{source_host}_" if source_host else ""
+        self._attr_unique_id = (
+            f"{entry.entry_id}_{source_prefix}lanpon_port_{ponid}_{description.key}"
+        )
         label = f"LANPON{ponid}"
         suffix = LANPON_PORT_SUFFIXES[description.key]
         self._attr_name = f"{label} {suffix}"
-        self._attr_suggested_object_id = f"{slugify(label)}_{description.key}"
+        object_prefix = f"rltech_olt_{slugify(source_host)}_" if source_host else ""
+        self._attr_suggested_object_id = (
+            f"{object_prefix}{slugify(label)}_{description.key}"
+        )
 
     @property
     def native_value(self) -> int | float | str | None:
@@ -725,4 +830,22 @@ class RltechLanPonPortSensor(RltechEntity, SensorEntity):
     def _lanpon_port(self) -> RltechLanPonPort | None:
         if self.coordinator.data is None:
             return None
+        if self._source_host:
+            source = self.coordinator.data.legacy_sources.get(self._source_host)
+            return source.lanpon_ports.get(self._ponid) if source else None
         return self.coordinator.data.lanpon_ports.get(self._ponid)
+
+    @property
+    def device_info(self):
+        if not self._source_host:
+            return controller_device_info(self.config_entry)
+        source = (
+            self.coordinator.data.legacy_sources.get(self._source_host)
+            if self.coordinator.data
+            else None
+        )
+        return legacy_olt_device_info(
+            self.config_entry,
+            self._source_host,
+            source.olt_status if source else None,
+        )
