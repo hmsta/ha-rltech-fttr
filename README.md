@@ -11,8 +11,54 @@ The integration reads two RLTech Web UI planes:
 - Optional local MQTT on port `8883` for faster station and AP health updates
   between HTTP polls.
 
-The integration logs out immediately after each poll so Web UI sessions are not
-kept open.
+RLTech Web UIs generally allow only one HTTP login session at a time. The
+integration logs out immediately after each poll so sessions are not kept open,
+but polling can only run while no administrator is logged into the same device
+Web UI.
+
+## Features
+
+- Adds the RLTech OLT/controller as a Home Assistant device with aggregate
+  status sensors.
+- Adds each managed FTTR AP as its own Home Assistant device, using the AP
+  serial number as the stable device/entity identity.
+- Tracks AP online state, profile, alias, associated-client count, optical
+  TX/RX power, and ONU source host.
+- Adds a Home Assistant reboot button for each AP when AP credentials are
+  configured.
+- Polls port `80` OLT hardware data for CPU usage, memory usage, runtime,
+  LAN/LAN-PON link state, and LAN-PON optical module values.
+- Supports additional port `80` OLT hosts for downstream/slave OLTs so ONU
+  optical rows can enrich APs connected behind those devices.
+- Keeps Wi-Fi stations as an in-memory inventory instead of creating hundreds
+  of Home Assistant tracker entities.
+- Provides a bundled station table card with search, filters, sorting,
+  pagination, mobile layout, hostname enrichment, MAC vendor lookup, and
+  readable traffic totals.
+- Provides a bundled AP table card with search, filters, sorting, pagination,
+  mobile layout, device links, and AP detail fields.
+- Optionally uses the RLTech local MQTT broker as a live overlay for fresher
+  station rows and known-AP health/online updates between HTTP polls.
+- Preserves last known inventory data on temporary poll failures or busy Web UI
+  sessions instead of clearing the tables immediately.
+
+## Screenshots
+
+### Station Table
+
+![Station table](screenshots/stations.png)
+
+### Access Point Table
+
+![Access point table](screenshots/accesspoints.png)
+
+### Access Point Device
+
+![Access point device](screenshots/device_ap.png)
+
+### OLT Device
+
+![OLT device](screenshots/olt.png)
 
 ## HACS install
 
@@ -52,91 +98,128 @@ Copy `custom_components/rltech_fttr` into Home Assistant's
 
 ## Configure
 
-Add the integration from the Home Assistant UI. Required fields:
+Add the integration from **Settings > Devices & services**.
 
-- OLT IP address or hostname, for example `192.168.1.1`. The integration
-  automatically uses `http://`, port `80`, port `8080`, and MQTT port `8883`.
-- Port `80` username, default `admin`
-- Port `80` password, default `admin`
-- Additional port `80` OLT hosts, optional. Use this for downstream/slave OLTs
-  whose ONU optical rows should enrich the APs discovered from the master.
-  Separate multiple hosts with commas, spaces, or new lines.
-- Username for the port `8080` FTTR Web UI
-- Password for the port `8080` FTTR Web UI
-- Scan interval, default `60` seconds
-- Station retention, default `3600` seconds
-- AP inventory polling, enabled by default
-- Station inventory polling, enabled by default
-- Hardware and ONU status polling, enabled by default
-- MQTT live overlay, disabled by default. When enabled, the integration uses
-  the same OLT host on fixed port `8883`. Configure MQTT username, password,
-  PSK identity, and PSK. The PSK may be pasted as hex, hex with separators, or
-  plain text; the integration stores it internally as hex. The MQTT connection
-  is owned by this integration and does not require Home Assistant's MQTT
-  integration.
-- AP username for direct AP actions, default `useradmin`
-- AP password for direct AP actions, default `1234`
-- Area for AP devices, optional. When set, newly created AP devices are assigned
-  to this area if they do not already have an area.
+### Main OLT
+
+Enter the OLT IP address or hostname, for example `192.168.1.1`. Do not include
+a port. The integration automatically uses:
+
+- `http://<host>` for port `80` hardware and optical status.
+- `http://<host>:8080` for FTTR AP and station inventory.
+- `<host>:8883` for optional MQTT live updates.
 
 The OLT serves plain HTTP in the observed deployment. Use this only on a trusted
 management network or VPN.
 
+### Login Credentials
+
+The setup flow asks for separate credentials because RLTech exposes different
+interfaces:
+
+- Port `80` credentials for OLT hardware, LAN/LAN-PON, and ONU optical status.
+- Port `8080` credentials for FTTR AP and station inventory.
+- AP credentials for direct AP actions, such as rebooting an AP from Home
+  Assistant.
+
+RLTech Web UIs usually allow only one login at a time. If you log into an OLT
+or AP Web UI manually to change configuration, use the Web UI logout button
+when you are done. Closing the browser tab may leave the session active until
+the device times it out. During that time the integration preserves last known
+data instead of polling through the busy login.
+
 The AP reboot button logs into the AP directly at `http://<ap-ip>` with the
-configured AP credentials and posts the RLTech reboot form. It does not log out
-after a successful reboot request because the AP Web UI is expected to restart.
+configured AP credentials. It does not log out after a successful reboot request
+because the AP Web UI is expected to restart.
 
-## Entities
+### Polling Options
 
-- One device for the OLT/controller with aggregate and optional health sensors.
+- Scan interval, default `60` seconds.
+- Station retention, default `3600` seconds. Inactive station rows are kept for
+  this long before they disappear from the station table.
+- AP inventory polling, enabled by default.
+- Station inventory polling, enabled by default.
+- Hardware and ONU status polling, enabled by default.
+
+### Additional OLT Hosts
+
+If some APs are physically connected behind downstream/slave OLTs, add those
+extra port `80` hosts in **Additional port 80 OLT hosts**. Separate multiple
+hosts with commas, spaces, or new lines.
+
+Additional OLT hosts are shown as separate OLT hardware devices and can enrich
+the AP table with ONU optical rows for APs connected behind them.
+
+### MQTT Live Overlay
+
+MQTT is optional and disabled by default. When enabled, the integration connects
+to the same OLT host on fixed port `8883`. Home Assistant's MQTT integration is
+not required.
+
+Use MQTT when you want station rows and known-AP health/status to update faster
+between normal HTTP polls. Leave it disabled if HTTP polling is enough.
+
+### AP Area
+
+Optionally choose a Home Assistant area for newly created AP devices. Existing
+AP devices keep their current area.
+
+## What Gets Added To Home Assistant
+
+### OLT Devices
+
+- One OLT/controller device for the configured main OLT.
 - One additional OLT hardware device for each configured additional port `80`
-  host, with its own CPU, memory, LAN, and LAN-PON sensors.
-- One Home Assistant device per managed AP with an `SN`, with AP status,
-  associated-client-count, profile, alias, and optional AP optical/status
-  sensors, plus a config button to reboot the AP through its direct Web UI.
-- Aggregate station sensors, including reported station count.
-- Optional LAN and LAN-PON diagnostic port sensors.
+  host.
+- OLT sensors for aggregate status, CPU usage, memory usage, runtime, LAN port
+  state, and LAN-PON optical values where available.
+
+### AP Devices
+
+- One Home Assistant device per managed AP that has an `SN`.
+- AP device and entity IDs are based on the AP serial number, not the AP alias.
+- AP entities include online state, associated-client count, profile, alias,
+  optical TX/RX power, ONU source host, and a reboot button where available.
+- AP rows without an `SN` remain visible in the AP table but do not create Home
+  Assistant devices.
+
+### Wi-Fi Stations
 
 Wi-Fi stations are not created as Home Assistant devices or trackers. They are
-kept as inventory rows for the bundled Lovelace card, avoiding entity-registry
-spam and recorder churn from volatile client details.
+kept as in-memory inventory rows for the station table. This avoids hundreds of
+volatile client entities and unnecessary recorder history.
 
-When FTTR station hostnames are missing or junk values such as `N/A`, the
-coordinator can enrich the in-memory station rows from Home Assistant's DHCP
-discovery cache. This is a once-per-poll map lookup by normalized MAC address
-and IP address; it does not create station entities or persist station data.
+The integration still exposes aggregate station sensors, including reported
+station count, so you can chart overall client count or alert on unusual
+changes.
 
-When MQTT live overlay is enabled, MQTT station updates also reuse this backend
-hostname enrichment. If a hostname is not known when a station first appears,
-the integration retries enrichment later so DHCP data that arrives after the
-station update can still fill the table row.
+Station hostnames can be enriched from Home Assistant's DHCP discovery cache
+when the RLTech station row has no useful hostname. Station rows also include a
+best-effort MAC vendor column from the local `aiooui` OUI database installed
+with the integration. Both lookups are local and do not create station entities.
 
-Station rows also include a best-effort MAC vendor column. This uses the local
-`aiooui` OUI database installed with the integration; it is a local file lookup,
-not an online lookup, and does not create station entities or persist station
-data.
+### Dashboard Cards
+
+The integration bundles two Lovelace cards:
+
+- Station table card for Wi-Fi client lookup.
+- AP table card for managed AP inventory and AP details.
 
 ## MQTT live overlay
 
-MQTT is optional and complements HTTP polling; it does not replace it.
+MQTT is optional. It complements HTTP polling and does not replace it.
 
 - HTTP remains the authority for AP inventory, station baseline, OLT status,
   LAN/LAN-PON status, and ONU optical TX/RX.
-- MQTT subscribes only to the local AP notification and AP lifecycle topics,
-  then parses station updates, known-AP health heartbeats, and known-AP
-  online/offline events.
-- MQTT station updates refresh the in-memory station table data between HTTP
-  polls, without creating station entities.
-- MQTT AP updates are applied only to APs already discovered by HTTP. Unknown
-  AP heartbeats and lifecycle events are ignored.
-- MQTT can update AP associated-client count, CPU usage, CPU temperature,
-  memory usage, flash usage, AP last boot, and AP online state.
-- The Lovelace cards remain pull-based. MQTT updates do not force the cards to
-  refetch or redraw on every message.
+- MQTT can make station rows fresher between HTTP polls.
+- MQTT can update known AP associated-client count, CPU usage, CPU temperature,
+  memory usage, flash usage, last boot, and online state.
+- Unknown AP MQTT messages are ignored. AP discovery still comes from HTTP.
+- The Lovelace cards do not redraw on every MQTT message. The station card can
+  refresh a narrowed view with debounce/throttling when station data changes.
 
 If MQTT is unavailable or misconfigured, the integration continues to work with
-HTTP polling only. MQTT passwords, PSKs, and raw payloads are not exposed in
-diagnostics.
+HTTP polling only.
 
 ## Station table card
 
@@ -158,11 +241,6 @@ remembered in the current browser's local storage. Search text is intentionally
 not remembered. On phone-sized screens the card switches from a wide table to a
 compact row layout using `mobile_columns`.
 
-When MQTT is enabled, the station card can subscribe to lightweight station
-change notifications. The backend sends only a dirty event, not station rows.
-The card auto-refetches only when the current view is narrowed by search text
-or filters, with debounce/throttling to avoid full-table churn.
-
 ## AP table card
 
 Add an AP inventory card:
@@ -173,9 +251,8 @@ type: custom:rltech-fttr-ap-table-card
 
 The AP card uses the same websocket pattern and supports search, sort, and
 filters for online state, profile, model, and uplink. It shows AP inventory
-fields such as alias, MAC, IP, firmware, channels, association count, uplink,
-serial number, and ONU optical/status details when hardware status polling is
-enabled.
+fields such as alias, MAC, IP, firmware, association count, uplink, serial
+number, and ONU optical/status details when hardware status polling is enabled.
 
 Source ownership is intentionally strict:
 
@@ -189,13 +266,6 @@ Source ownership is intentionally strict:
 - `Reg/Off Time` is parsed as a timestamp using Home Assistant's local time
   zone. For online ONUs it appears to be registration time; for offline ONUs it
   appears to be off time.
-
-AP devices and AP sensor unique IDs use the AP hardware serial, for example
-`RLGM3BB8E3D0`. AP rows without an `SN` remain visible as table inventory but
-do not create AP HA devices/entities, avoiding accidental duplicate devices
-from fallback identifiers. New AP sensor entity IDs are suggested from the
-serial, while the friendly device name can still use the AP alias. Each AP
-device uses its AP IP as the Home Assistant configuration URL when available.
 
 The AP table receives the current HA entity IDs from Home Assistant's entity
 registry; clicking AP-backed cells such as alias, state, profile, or associated
