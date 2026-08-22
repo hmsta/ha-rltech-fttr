@@ -26,6 +26,7 @@ from .const import (
     STATION_CARD_URL,
 )
 from .coordinator import RltechCoordinator, build_client
+from .oui_enrichment import async_load_oui
 from .websocket import async_setup_websocket
 
 _LOGGER = logging.getLogger(__name__)
@@ -141,6 +142,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     client = build_client(entry)
     coordinator = RltechCoordinator(hass, entry, client)
+    await async_load_oui()
     await coordinator.async_config_entry_first_refresh()
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator

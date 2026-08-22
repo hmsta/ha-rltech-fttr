@@ -225,6 +225,7 @@ def merge_station_updates(
             id=previous.id if previous else None,
             ip=update.ip or (previous.ip if previous else None),
             hostname=hostname,
+            vendor=previous.vendor if previous else None,
             ssid=update.ssid or (previous.ssid if previous else None),
             ap_mac=update.ap_mac or (previous.ap_mac if previous else None),
             ap_alias=ap_alias or (previous.ap_alias if previous else None),
@@ -345,8 +346,13 @@ def _preserve_live_station_fields(
         if fresh_station is None or _station_is_newer(current_station, fresh_station):
             stations[mac] = current_station
             continue
+        preserved = {}
         if not fresh_station.hostname and current_station.hostname:
-            stations[mac] = replace(fresh_station, hostname=current_station.hostname)
+            preserved["hostname"] = current_station.hostname
+        if not fresh_station.vendor and current_station.vendor:
+            preserved["vendor"] = current_station.vendor
+        if preserved:
+            stations[mac] = replace(fresh_station, **preserved)
     return stations
 
 

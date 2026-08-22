@@ -7,6 +7,6 @@
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/hmsta/ha-rltech-fttr/issues",
   "name": "RLTech FTTR",
-  "requirements": [],
+  "requirements": ["aiooui==0.1.9"],
   "version": "0.1.0"
 }

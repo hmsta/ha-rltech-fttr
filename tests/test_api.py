@@ -29,6 +29,7 @@ identifiers = load_module("identifiers")
 ap_inventory = load_module("ap_inventory")
 dhcp_enrichment = load_module("dhcp_enrichment")
 hostname_enrichment = load_module("hostname_enrichment")
+oui_enrichment = load_module("oui_enrichment")
 station_inventory = load_module("station_inventory")
 mqtt = load_module("mqtt")
 
@@ -217,6 +218,7 @@ def test_station_inventory_rows_are_serialized_without_entities() -> None:
             "mac": "7C:45:D0:4C:17:59",
             "ip": "192.168.1.10",
             "hostname": "phone",
+            "vendor": None,
             "ssid": "main",
             "ap_mac": "44:95:3B:B8:DC:D0",
             "ap_alias": None,
@@ -298,6 +300,37 @@ def test_dhcp_enrichment_does_not_replace_useful_fttr_hostname() -> None:
     )
 
     assert enriched.stations["7C:45:D0:4C:17:59"].hostname == "fttr-phone"
+
+
+def test_oui_enrichment_fills_missing_station_vendor_only() -> None:
+    data = models.RltechData(
+        stations={
+            "7C:45:D0:4C:17:59": models.RltechStation(
+                mac="7C:45:D0:4C:17:59",
+                reported_online=True,
+                home=True,
+                last_seen=None,
+            ),
+            "AA:BB:CC:00:00:01": models.RltechStation(
+                mac="AA:BB:CC:00:00:01",
+                reported_online=True,
+                home=True,
+                last_seen=None,
+                vendor="Existing Vendor",
+            ),
+        }
+    )
+
+    enriched = oui_enrichment.enrich_station_vendors(
+        data,
+        lambda mac: {
+            "7C:45:D0:4C:17:59": "Lookup Vendor",
+            "AA:BB:CC:00:00:01": "Wrong Vendor",
+        }.get(mac),
+    )
+
+    assert enriched.stations["7C:45:D0:4C:17:59"].vendor == "Lookup Vendor"
+    assert enriched.stations["AA:BB:CC:00:00:01"].vendor == "Existing Vendor"
 
 
 def test_mqtt_station_update_merges_into_station_inventory() -> None:

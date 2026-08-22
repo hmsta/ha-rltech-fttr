@@ -108,6 +108,11 @@ hostname enrichment. If a hostname is not known when a station first appears,
 the integration retries enrichment later so DHCP data that arrives after the
 station update can still fill the table row.
 
+Station rows also include a best-effort MAC vendor column. This uses the local
+`aiooui` OUI database installed with the integration; it is a local file lookup,
+not an online lookup, and does not create station entities or persist station
+data.
+
 ## MQTT live overlay
 
 MQTT is optional and complements HTTP polling; it does not replace it.

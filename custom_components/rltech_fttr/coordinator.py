@@ -61,6 +61,7 @@ from .mqtt import (
     merge_station_updates,
     preserve_live_overlay,
 )
+from .oui_enrichment import enrich_station_vendors
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -130,9 +131,11 @@ class RltechCoordinator(DataUpdateCoordinator[RltechData]):
             data = enrich_from_home_assistant_dhcp(self.hass, data)
         except Exception as err:  # pragma: no cover - defensive around HA internals
             _LOGGER.debug("Unable to enrich station hostnames from DHCP cache: %s", err)
+        data = enrich_station_vendors(data)
         current = self._last_data
         if current is not None and current is not previous:
             data = preserve_live_overlay(current, data, previous)
+            data = enrich_station_vendors(data)
         self._last_data = data
         return data
 
@@ -169,6 +172,7 @@ class RltechCoordinator(DataUpdateCoordinator[RltechData]):
         if cmd == "XReport_StaList" and isinstance(update, list):
             data = merge_station_updates(data, update, now=now)
             data = self._maybe_enrich_mqtt_station_hostnames(data, now)
+            data = enrich_station_vendors(data)
         elif cmd == "XReport_ExtendInfo" and isinstance(update, MqttApHealthUpdate):
             data = merge_ap_health_update(data, update, now=now)
         else:

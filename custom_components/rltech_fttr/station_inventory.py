@@ -13,6 +13,7 @@ def station_to_row(station: RltechStation) -> dict[str, Any]:
         "mac": station.mac,
         "ip": station.ip,
         "hostname": station.hostname,
+        "vendor": station.vendor,
         "ssid": station.ssid,
         "ap_mac": station.ap_mac,
         "ap_alias": station.ap_alias,

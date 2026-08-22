@@ -100,6 +100,7 @@ class RltechFttrStationTableCard extends HTMLElement {
       ["mac", "MAC"],
       ["ip", "IP"],
       ["hostname", "Hostname"],
+      ["vendor", "Vendor"],
       ["ssid", "SSID"],
       ["ap_alias", "AP", (row) => this._escape(row.ap_alias || row.ap_mac), (row) => row.ap_alias || row.ap_mac],
       ["reported_online", "State", (row) => (row.reported_online ? "Active" : "Inactive"), (row) => (row.reported_online ? "active" : "inactive")],
@@ -127,7 +128,7 @@ class RltechFttrStationTableCard extends HTMLElement {
   }
 
   _defaultColumns() {
-    return ["hostname", "ip", "ssid", "ap_alias", "reported_online", "rssi", "details"];
+    return ["hostname", "vendor", "ip", "ssid", "ap_alias", "reported_online", "rssi", "details"];
   }
 
   _defaultMobileColumns() {

@@ -100,6 +100,7 @@ class RltechStation:
     id: str | None = None
     ip: str | None = None
     hostname: str | None = None
+    vendor: str | None = None
     ssid: str | None = None
     ap_mac: str | None = None
     ap_alias: str | None = None
