@@ -130,7 +130,7 @@ class RltechFttrStationTableCard extends HTMLElement {
       ["last_seen", "Last seen", (row) => this._escape(this._formatLastSeen(row.last_seen)), (row) => row.last_seen],
       ["alias", "Alias"],
       ["ap_mac", "AP MAC"],
-      ["total_count", "Total"],
+      ["total_count", "Traffic", (row) => this._escape(this._formatTraffic(row.total_count)), (row) => row.total_count],
     ].map(([key, label, render, sort]) => ({
       key,
       label,
@@ -1223,6 +1223,17 @@ class RltechFttrStationTableCard extends HTMLElement {
     }
     const ageSeconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
     return `${this._formatDuration(ageSeconds)} ago`;
+  }
+
+  _formatTraffic(value) {
+    const megabytes = Number(value);
+    if (!Number.isFinite(megabytes) || megabytes < 0) {
+      return "";
+    }
+    if (megabytes >= 1024) {
+      return `${(megabytes / 1024).toFixed(1)} GB`;
+    }
+    return `${megabytes.toFixed(1)} MB`;
   }
 }
 
