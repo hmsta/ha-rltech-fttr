@@ -122,14 +122,15 @@ MQTT is optional and complements HTTP polling; it does not replace it.
 
 - HTTP remains the authority for AP inventory, station baseline, OLT status,
   LAN/LAN-PON status, and ONU optical TX/RX.
-- MQTT subscribes only to the local AP notification topic and parses station
-  updates plus known-AP health heartbeats.
+- MQTT subscribes only to the local AP notification and AP lifecycle topics,
+  then parses station updates, known-AP health heartbeats, and known-AP
+  online/offline events.
 - MQTT station updates refresh the in-memory station table data between HTTP
   polls, without creating station entities.
-- MQTT AP health updates are applied only to APs already discovered by HTTP.
-  Unknown AP heartbeats are ignored.
+- MQTT AP updates are applied only to APs already discovered by HTTP. Unknown
+  AP heartbeats and lifecycle events are ignored.
 - MQTT can update AP associated-client count, CPU usage, CPU temperature,
-  memory usage, flash usage, and AP last boot.
+  memory usage, flash usage, AP last boot, and AP online state.
 - The Lovelace cards remain pull-based. MQTT updates do not force the cards to
   refetch or redraw on every message.
 

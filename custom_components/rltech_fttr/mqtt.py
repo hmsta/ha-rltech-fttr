@@ -9,6 +9,7 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 import json
 import logging
+import re
 import ssl
 import struct
 from typing import Any
@@ -18,6 +19,9 @@ from .models import RltechAp, RltechApDetail, RltechData, RltechStation
 _LOGGER = logging.getLogger(__name__)
 
 TOPIC_AP_NOTIFY = "/homeGatewayProxy/v2/AP2AC/messsage/notify"
+TOPIC_AP_ONLINE = "/homeGatewayProxy/v2/AP/messsage/online"
+TOPIC_AP_OFFLINE = "/homeGatewayProxy/v2/AP/messsage/offline"
+MQTT_TOPICS = [TOPIC_AP_NOTIFY, TOPIC_AP_ONLINE, TOPIC_AP_OFFLINE]
 MQTT_KEEPALIVE = 30
 LAST_BOOT_STABILITY = timedelta(seconds=60)
 BANDWIDTH_MAP = {
@@ -67,6 +71,15 @@ class MqttApHealthUpdate:
     memory_usage: float | None = None
     flash_usage: float | None = None
     uptime: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class MqttApStatusUpdate:
+    """Normalized known-AP online/offline update."""
+
+    online: bool
+    mac: str | None = None
+    sn: str | None = None
 
 
 @dataclass(slots=True)
@@ -121,8 +134,17 @@ def build_psk_context(psk_identity: str, psk_hex: str) -> ssl.SSLContext:
 
 def parse_mqtt_payload(
     payload: str,
-) -> tuple[str, list[MqttStationUpdate] | MqttApHealthUpdate | None]:
+    topic: str = "",
+) -> tuple[
+    str, list[MqttStationUpdate] | MqttApHealthUpdate | MqttApStatusUpdate | None
+]:
     """Parse one MQTT payload into a supported normalized update."""
+    if topic in {TOPIC_AP_ONLINE, TOPIC_AP_OFFLINE}:
+        online = topic == TOPIC_AP_ONLINE
+        return (
+            "APOnline" if online else "APOffline",
+            parse_ap_status(payload, online=online),
+        )
     try:
         message = json.loads(payload)
     except json.JSONDecodeError as err:
@@ -195,6 +217,19 @@ def parse_ap_health(message: dict[str, Any]) -> MqttApHealthUpdate | None:
         flash_usage=_float(data.get("FlashUsage")),
         uptime=_int(data.get("SysDuration")),
     )
+
+
+def parse_ap_status(payload: str, *, online: bool) -> MqttApStatusUpdate | None:
+    """Parse an AP lifecycle topic payload into a known-AP status update."""
+    stripped = payload.strip()
+    try:
+        message: Any = json.loads(stripped) if stripped else {}
+    except json.JSONDecodeError:
+        message = stripped
+    mac, sn = _extract_ap_identity(message)
+    if mac is None and sn is None:
+        return None
+    return MqttApStatusUpdate(online=online, mac=mac, sn=sn)
 
 
 def merge_station_updates(
@@ -312,6 +347,34 @@ def merge_ap_health_update(
     return replace(data, aps=aps, ap_details=details)
 
 
+def merge_ap_status_update(
+    data: RltechData,
+    update: MqttApStatusUpdate | None,
+) -> RltechData:
+    """Merge one MQTT AP online/offline update for an AP already known from HTTP."""
+    if update is None:
+        return data
+    mac = update.mac if update.mac in data.aps else None
+    if mac is None and update.sn is not None:
+        mac = next(
+            (
+                ap_mac
+                for ap_mac, ap in data.aps.items()
+                if _normalize_sn(ap.sn) == update.sn
+            ),
+            None,
+        )
+    if mac is None:
+        return data
+
+    ap = data.aps[mac]
+    if ap.online is update.online:
+        return data
+    aps = dict(data.aps)
+    aps[mac] = replace(ap, online=update.online)
+    return replace(data, aps=aps)
+
+
 def preserve_live_overlay(
     current: RltechData, fresh: RltechData, previous: RltechData | None = None
 ) -> RltechData:
@@ -328,11 +391,17 @@ def _preserve_live_ap_fields(
     """Return AP rows with MQTT-fresher values kept for known APs."""
     aps = dict(fresh.aps)
     for mac, current_ap in current.aps.items():
-        if mac not in aps or current_ap.assoc_count is None:
+        if mac not in aps:
             continue
         if previous is not None and current_ap == previous.aps.get(mac):
             continue
-        aps[mac] = replace(aps[mac], assoc_count=current_ap.assoc_count)
+        updates: dict[str, Any] = {}
+        if current_ap.assoc_count is not None:
+            updates["assoc_count"] = current_ap.assoc_count
+        if current_ap.online is not None:
+            updates["online"] = current_ap.online
+        if updates:
+            aps[mac] = replace(aps[mac], **updates)
     return aps
 
 
@@ -565,7 +634,14 @@ class RltechMqttManager:
         psk_hex: str,
         client_id: str,
         apply_update: Callable[
-            [str, list[MqttStationUpdate] | MqttApHealthUpdate | None, datetime],
+            [
+                str,
+                list[MqttStationUpdate]
+                | MqttApHealthUpdate
+                | MqttApStatusUpdate
+                | None,
+                datetime,
+            ],
             None,
         ],
         stats: RltechMqttStats,
@@ -618,7 +694,7 @@ class RltechMqttManager:
             self._client = client
             try:
                 await asyncio.wait_for(client.connect(), timeout=10)
-                await asyncio.wait_for(client.subscribe([TOPIC_AP_NOTIFY]), timeout=10)
+                await asyncio.wait_for(client.subscribe(MQTT_TOPICS), timeout=10)
                 self.stats.connected = True
                 self.stats.last_connect = datetime.now().astimezone()
                 self.stats.tls_version = client.tls_version
@@ -658,9 +734,9 @@ class RltechMqttManager:
                 continue
             if message is None:
                 continue
-            _topic, payload = message
+            topic, payload = message
             try:
-                cmd, update = parse_mqtt_payload(payload)
+                cmd, update = parse_mqtt_payload(payload, topic)
             except RltechMqttError as err:
                 self.stats.message_counts["parse_error"] += 1
                 self.stats.last_error = str(err)
@@ -708,6 +784,68 @@ def _normalize_mac(value: Any) -> str | None:
     if len(text) != 12:
         return None
     return ":".join(text[index : index + 2] for index in range(0, 12, 2))
+
+
+def _normalize_sn(value: Any) -> str | None:
+    text = (
+        str(value or "")
+        .strip()
+        .upper()
+        .replace("-", "")
+        .replace("_", "")
+        .replace(":", "")
+        .replace(" ", "")
+    )
+    if not text.startswith("RLGM") or len(text) < 8:
+        return None
+    return text
+
+
+def _extract_ap_identity(value: Any) -> tuple[str | None, str | None]:
+    """Return AP MAC/SN identity from common RLTech lifecycle payload shapes."""
+    if isinstance(value, dict):
+        mac = _first_normalized(value, _normalize_mac, ("Mac", "MAC", "mac", "APMac"))
+        sn = _first_normalized(
+            value,
+            _normalize_sn,
+            ("SN", "sn", "PONSN", "PONSn", "PonSn", "pon_sn", "ponSn"),
+        )
+        if mac or sn:
+            return mac, sn
+        for nested_key in ("Data", "data", "Payload", "payload", "Body", "body"):
+            nested = value.get(nested_key)
+            if isinstance(nested, dict | str):
+                mac, sn = _extract_ap_identity(nested)
+                if mac or sn:
+                    return mac, sn
+        for nested in value.values():
+            if isinstance(nested, dict):
+                mac, sn = _extract_ap_identity(nested)
+                if mac or sn:
+                    return mac, sn
+        return None, None
+    if isinstance(value, str):
+        mac_match = re.search(
+            r"(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}|(?<![0-9A-Fa-f])[0-9A-Fa-f]{12}(?![0-9A-Fa-f])",
+            value,
+        )
+        mac = _normalize_mac(mac_match.group(0)) if mac_match else None
+        sn_match = re.search(r"RLGM[-_: ]?[0-9A-Fa-f]{8}", value, re.IGNORECASE)
+        sn = _normalize_sn(sn_match.group(0)) if sn_match else None
+        return mac, sn
+    return None, None
+
+
+def _first_normalized(
+    data: dict[str, Any],
+    normalizer: Callable[[Any], str | None],
+    keys: tuple[str, ...],
+) -> str | None:
+    for key in keys:
+        normalized = normalizer(data.get(key))
+        if normalized:
+            return normalized
+    return None
 
 
 def _none_if_empty(value: Any) -> str | None:

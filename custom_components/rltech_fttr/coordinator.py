@@ -57,10 +57,12 @@ from .hostname_enrichment import enrich_from_home_assistant_dhcp
 from .models import RltechData
 from .mqtt import (
     MqttApHealthUpdate,
+    MqttApStatusUpdate,
     MqttStationUpdate,
     RltechMqttManager,
     RltechMqttStats,
     merge_ap_health_update,
+    merge_ap_status_update,
     merge_station_updates,
     preserve_live_overlay,
 )
@@ -165,7 +167,10 @@ class RltechCoordinator(DataUpdateCoordinator[RltechData]):
     def async_apply_mqtt_update(
         self,
         cmd: str,
-        update: list[MqttStationUpdate] | MqttApHealthUpdate | None,
+        update: list[MqttStationUpdate]
+        | MqttApHealthUpdate
+        | MqttApStatusUpdate
+        | None,
         now: datetime,
     ) -> None:
         """Merge one parsed MQTT update into the in-memory coordinator data."""
@@ -178,6 +183,10 @@ class RltechCoordinator(DataUpdateCoordinator[RltechData]):
             data = enrich_station_vendors(data)
         elif cmd == "XReport_ExtendInfo" and isinstance(update, MqttApHealthUpdate):
             data = merge_ap_health_update(data, update, now=now)
+        elif cmd in {"APOnline", "APOffline"} and isinstance(
+            update, MqttApStatusUpdate
+        ):
+            data = merge_ap_status_update(data, update)
         else:
             return
         if data is self._last_data:

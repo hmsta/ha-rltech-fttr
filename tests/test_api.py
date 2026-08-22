@@ -456,6 +456,60 @@ def test_mqtt_ap_health_updates_known_ap_only_and_stabilizes_boot_time() -> None
     assert mqtt.merge_ap_health_update(data, unknown, now=now) is data
 
 
+def test_mqtt_ap_lifecycle_updates_known_ap_only() -> None:
+    mac = "44:95:3B:B8:DC:D0"
+    data = models.RltechData(
+        aps={
+            mac: models.RltechAp(
+                mac=mac,
+                sn="RLGM3BB8DCD0",
+                online=True,
+            )
+        }
+    )
+    cmd, update = mqtt.parse_mqtt_payload(
+        json.dumps({"Mac": "44953BB8DCD0"}), mqtt.TOPIC_AP_OFFLINE
+    )
+
+    assert cmd == "APOffline"
+    assert isinstance(update, mqtt.MqttApStatusUpdate)
+    assert update.mac == mac
+    assert update.online is False
+
+    merged = mqtt.merge_ap_status_update(data, update)
+    assert merged.aps[mac].online is False
+    assert mqtt.merge_ap_status_update(merged, update) is merged
+
+    unknown = mqtt.MqttApStatusUpdate(
+        online=True, mac="44:95:3B:B8:FF:FF", sn=None
+    )
+    assert mqtt.merge_ap_status_update(data, unknown) is data
+
+
+def test_mqtt_ap_lifecycle_can_match_by_sn() -> None:
+    mac = "44:95:3B:B8:DC:D0"
+    data = models.RltechData(
+        aps={
+            mac: models.RltechAp(
+                mac=mac,
+                sn="RLGM3BB8DCD0",
+                online=False,
+            )
+        }
+    )
+    cmd, update = mqtt.parse_mqtt_payload(
+        json.dumps({"Data": {"PONSN": "RLGM-3BB8DCD0"}}), mqtt.TOPIC_AP_ONLINE
+    )
+
+    assert cmd == "APOnline"
+    assert isinstance(update, mqtt.MqttApStatusUpdate)
+    assert update.sn == "RLGM3BB8DCD0"
+    assert update.online is True
+
+    merged = mqtt.merge_ap_status_update(data, update)
+    assert merged.aps[mac].online is True
+
+
 def test_mqtt_live_overlay_preserves_newer_station_update() -> None:
     fresh_time = datetime(2026, 8, 21, 12, 0, tzinfo=UTC)
     current_time = fresh_time + timedelta(seconds=10)
@@ -594,6 +648,28 @@ def test_mqtt_live_overlay_only_preserves_ap_assoc_changed_during_poll() -> None
 
     assert stale_merged.aps[mac].assoc_count == 9
     assert changed_merged.aps[mac].assoc_count == 13
+
+
+def test_mqtt_live_overlay_preserves_ap_online_changed_during_poll() -> None:
+    mac = "44:95:3B:B8:DC:D0"
+    previous = models.RltechData(
+        aps={mac: models.RltechAp(mac=mac, sn="RLGM3BB8DCD0", online=True)}
+    )
+    current_unchanged = models.RltechData(
+        aps={mac: models.RltechAp(mac=mac, sn="RLGM3BB8DCD0", online=True)}
+    )
+    current_changed = models.RltechData(
+        aps={mac: models.RltechAp(mac=mac, sn="RLGM3BB8DCD0", online=False)}
+    )
+    fresh = models.RltechData(
+        aps={mac: models.RltechAp(mac=mac, sn="RLGM3BB8DCD0", online=True)}
+    )
+
+    stale_merged = mqtt.preserve_live_overlay(current_unchanged, fresh, previous)
+    changed_merged = mqtt.preserve_live_overlay(current_changed, fresh, previous)
+
+    assert stale_merged.aps[mac].online is True
+    assert changed_merged.aps[mac].online is False
 
 
 def test_mqtt_packet_reader_handles_publish_ping_and_disconnect() -> None:
