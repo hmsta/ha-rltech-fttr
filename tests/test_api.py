@@ -229,7 +229,6 @@ def test_station_inventory_rows_are_serialized_without_entities() -> None:
             "uptime": 123,
             "reported_online": True,
             "last_seen": now.isoformat(),
-            "alias": None,
             "home": True,
             "rx_rate": None,
             "tx_rate": None,

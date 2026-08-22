@@ -120,7 +120,6 @@ class RltechFttrStationTableCard extends HTMLElement {
       ["rssi", "RSSI dBm"],
       ["band", "Band"],
       ["channel", "Ch"],
-      ["bandwidth", "Width"],
       ["vlan", "VLAN"],
       ["rx_rate", "RX Mbps"],
       ["tx_rate", "TX Mbps"],
@@ -128,7 +127,6 @@ class RltechFttrStationTableCard extends HTMLElement {
       ["tx_nego_rate", "TX link"],
       ["uptime", "Uptime", (row) => this._escape(this._formatDuration(row.uptime)), (row) => row.uptime],
       ["last_seen", "Last seen", (row) => this._escape(this._formatLastSeen(row.last_seen)), (row) => row.last_seen],
-      ["alias", "Alias"],
       ["ap_mac", "AP MAC"],
       ["total_count", "Traffic", (row) => this._escape(this._formatTraffic(row.total_count)), (row) => row.total_count],
     ].map(([key, label, render, sort]) => ({

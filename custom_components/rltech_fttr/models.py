@@ -114,7 +114,6 @@ class RltechStation:
     band: str | None = None
     bandwidth: str | None = None
     vlan: int | None = None
-    alias: str | None = None
     total_count: str | None = None
     update_time: int | None = None
 

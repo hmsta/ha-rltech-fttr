@@ -24,7 +24,6 @@ def station_to_row(station: RltechStation) -> dict[str, Any]:
         "uptime": station.uptime,
         "reported_online": station.reported_online,
         "last_seen": station.last_seen.isoformat() if station.last_seen else None,
-        "alias": station.alias,
         "home": station.home,
         "rx_rate": station.rx_rate,
         "tx_rate": station.tx_rate,

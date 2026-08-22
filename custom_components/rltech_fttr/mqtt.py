@@ -274,7 +274,6 @@ def merge_station_updates(
             band=update.band,
             bandwidth=update.bandwidth,
             vlan=update.vlan,
-            alias=previous.alias if previous else None,
             total_count=previous.total_count if previous else None,
             update_time=previous.update_time if previous else None,
         )

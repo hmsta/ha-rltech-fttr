@@ -347,7 +347,6 @@ def normalize_station(
         band=_channel_band(channel),
         bandwidth=_bandwidth(row.get("Bandwidth")),
         vlan=_int(row.get("Vlan")),
-        alias=_text(row.get("Alias")),
         total_count=_text(row.get("ToTalcnt")),
         update_time=_int(row.get("UpDateTime")),
     )
