@@ -55,24 +55,27 @@ Copy `custom_components/rltech_fttr` into Home Assistant's
 Add the integration from the Home Assistant UI. Required fields:
 
 - OLT IP address or hostname, for example `192.168.1.1`. The integration
-  automatically uses `http://`, port `8080`, and port `80`.
-- Username for the port `8080` FTTR Web UI
-- Password for the port `8080` FTTR Web UI
+  automatically uses `http://`, port `80`, port `8080`, and MQTT port `8883`.
 - Port `80` username, default `admin`
 - Port `80` password, default `admin`
-- AP username for direct AP actions, default `useradmin`
-- AP password for direct AP actions, default `1234`
 - Additional port `80` OLT hosts, optional. Use this for downstream/slave OLTs
   whose ONU optical rows should enrich the APs discovered from the master.
+  Separate multiple hosts with commas, spaces, or new lines.
+- Username for the port `8080` FTTR Web UI
+- Password for the port `8080` FTTR Web UI
 - Scan interval, default `60` seconds
 - Station retention, default `3600` seconds
 - AP inventory polling, enabled by default
 - Station inventory polling, enabled by default
 - Hardware and ONU status polling, enabled by default
-- MQTT live overlay, disabled by default. When enabled, configure the local
-  MQTT host, port, username, password, PSK identity, and hex PSK. The MQTT
-  connection is owned by this integration and does not require Home Assistant's
-  MQTT integration.
+- MQTT live overlay, disabled by default. When enabled, the integration uses
+  the same OLT host on fixed port `8883`. Configure MQTT username, password,
+  PSK identity, and PSK. The PSK may be pasted as hex, hex with separators, or
+  plain text; the integration stores it internally as hex. The MQTT connection
+  is owned by this integration and does not require Home Assistant's MQTT
+  integration.
+- AP username for direct AP actions, default `useradmin`
+- AP password for direct AP actions, default `1234`
 - Area for AP devices, optional. When set, newly created AP devices are assigned
   to this area if they do not already have an area.
 

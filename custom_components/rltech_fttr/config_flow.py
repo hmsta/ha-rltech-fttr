@@ -86,11 +86,35 @@ def _host_to_base_url(value: str) -> str:
     return f"http://{host}:8080"
 
 
-def _mqtt_host_default(defaults: dict[str, Any]) -> str:
-    """Return the MQTT host form default."""
-    return defaults.get(CONF_MQTT_HOST) or _base_url_to_host(
-        defaults.get(CONF_BASE_URL, DEFAULT_BASE_URL)
+def _normalize_mqtt_psk(value: object) -> str:
+    """Return a hex PSK, accepting either pasted hex or plain text."""
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    compact = (
+        text.replace(":", "")
+        .replace("-", "")
+        .replace(" ", "")
+        .replace("\n", "")
+        .replace("\r", "")
+        .replace("\t", "")
     )
+    if compact and len(compact) % 2 == 0:
+        try:
+            bytes.fromhex(compact)
+        except ValueError:
+            pass
+        else:
+            return compact.lower()
+    return text.encode().hex()
+
+
+def _apply_derived_fields(user_input: dict[str, Any]) -> None:
+    """Store fixed-port derived fields that are intentionally hidden from UI."""
+    user_input[CONF_MQTT_HOST] = _base_url_to_host(user_input[CONF_BASE_URL])
+    user_input[CONF_MQTT_PORT] = DEFAULT_MQTT_PORT
+    if user_input.get(CONF_MQTT_PSK):
+        user_input[CONF_MQTT_PSK] = _normalize_mqtt_psk(user_input[CONF_MQTT_PSK])
 
 
 def _schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
@@ -109,6 +133,22 @@ def _schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
             CONF_BASE_URL,
             default=_base_url_to_host(defaults.get(CONF_BASE_URL, DEFAULT_BASE_URL)),
         ): str,
+        vol.Optional(
+            CONF_ENABLE_HARDWARE_STATUS,
+            default=defaults.get(
+                CONF_ENABLE_HARDWARE_STATUS,
+                defaults.get("enable_olt_status", DEFAULT_ENABLE_HARDWARE_STATUS),
+            ),
+        ): bool,
+        vol.Optional(
+            CONF_LEGACY_USERNAME,
+            default=defaults.get(CONF_LEGACY_USERNAME, DEFAULT_LEGACY_USERNAME),
+        ): str,
+        vol.Optional(CONF_LEGACY_PASSWORD): password_selector,
+        vol.Optional(
+            CONF_LEGACY_HOSTS,
+            default=defaults.get(CONF_LEGACY_HOSTS, ""),
+        ): selector.TextSelector(selector.TextSelectorConfig(multiline=True)),
         vol.Required(
             CONF_USERNAME, default=defaults.get(CONF_USERNAME, DEFAULT_USERNAME)
         ): str,
@@ -117,23 +157,8 @@ def _schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
         schema[vol.Optional(CONF_PASSWORD)] = password_selector
     else:
         schema[vol.Required(CONF_PASSWORD)] = password_selector
-    schema[
-        vol.Optional(
-            CONF_AP_USERNAME,
-            default=defaults.get(CONF_AP_USERNAME, DEFAULT_AP_USERNAME),
-        )
-    ] = str
-    schema[vol.Optional(CONF_AP_PASSWORD)] = password_selector
     schema.update(
         {
-            vol.Optional(
-                CONF_SCAN_INTERVAL,
-                default=defaults.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
-            ): vol.All(vol.Coerce(int), vol.Range(min=MIN_SCAN_INTERVAL)),
-            vol.Optional(
-                CONF_STATION_RETENTION,
-                default=defaults.get(CONF_STATION_RETENTION, DEFAULT_STATION_RETENTION),
-            ): vol.All(vol.Coerce(int), vol.Range(min=0)),
             vol.Optional(
                 CONF_ENABLE_AP_POLLING,
                 default=defaults.get(
@@ -147,21 +172,17 @@ def _schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
                 ),
             ): bool,
             vol.Optional(
-                CONF_ENABLE_HARDWARE_STATUS,
-                default=defaults.get(
-                    CONF_ENABLE_HARDWARE_STATUS,
-                    defaults.get("enable_olt_status", DEFAULT_ENABLE_HARDWARE_STATUS),
-                ),
-            ): bool,
+                CONF_SCAN_INTERVAL,
+                default=defaults.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
+            ): vol.All(vol.Coerce(int), vol.Range(min=MIN_SCAN_INTERVAL)),
+            vol.Optional(
+                CONF_STATION_RETENTION,
+                default=defaults.get(CONF_STATION_RETENTION, DEFAULT_STATION_RETENTION),
+            ): vol.All(vol.Coerce(int), vol.Range(min=0)),
             vol.Optional(
                 CONF_ENABLE_MQTT,
                 default=defaults.get(CONF_ENABLE_MQTT, DEFAULT_ENABLE_MQTT),
             ): bool,
-            vol.Optional(CONF_MQTT_HOST, default=_mqtt_host_default(defaults)): str,
-            vol.Optional(
-                CONF_MQTT_PORT,
-                default=defaults.get(CONF_MQTT_PORT, DEFAULT_MQTT_PORT),
-            ): vol.All(vol.Coerce(int), vol.Range(min=1, max=65535)),
             vol.Optional(
                 CONF_MQTT_USERNAME,
                 default=defaults.get(CONF_MQTT_USERNAME, DEFAULT_MQTT_USERNAME),
@@ -173,14 +194,10 @@ def _schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
             ): str,
             vol.Optional(CONF_MQTT_PSK): password_selector,
             vol.Optional(
-                CONF_LEGACY_USERNAME,
-                default=defaults.get(CONF_LEGACY_USERNAME, DEFAULT_LEGACY_USERNAME),
+                CONF_AP_USERNAME,
+                default=defaults.get(CONF_AP_USERNAME, DEFAULT_AP_USERNAME),
             ): str,
-            vol.Optional(CONF_LEGACY_PASSWORD): password_selector,
-            vol.Optional(
-                CONF_LEGACY_HOSTS,
-                default=defaults.get(CONF_LEGACY_HOSTS, ""),
-            ): str,
+            vol.Optional(CONF_AP_PASSWORD): password_selector,
             ap_area_key: selector.AreaSelector(),
         }
     )
@@ -213,20 +230,13 @@ class RltechConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             user_input[CONF_BASE_URL] = _host_to_base_url(user_input[CONF_BASE_URL])
+            _apply_derived_fields(user_input)
             if not user_input.get(CONF_LEGACY_PASSWORD):
                 user_input[CONF_LEGACY_PASSWORD] = DEFAULT_LEGACY_PASSWORD
             if not user_input.get(CONF_AP_PASSWORD):
                 user_input[CONF_AP_PASSWORD] = DEFAULT_AP_PASSWORD
             if not user_input.get(CONF_AP_USERNAME):
                 user_input[CONF_AP_USERNAME] = DEFAULT_AP_USERNAME
-            if not user_input.get(CONF_MQTT_HOST):
-                user_input[CONF_MQTT_HOST] = _base_url_to_host(
-                    user_input[CONF_BASE_URL]
-                )
-            else:
-                user_input[CONF_MQTT_HOST] = _base_url_to_host(
-                    user_input[CONF_MQTT_HOST]
-                )
             if not user_input.get(CONF_MQTT_PASSWORD):
                 user_input[CONF_MQTT_PASSWORD] = DEFAULT_MQTT_PASSWORD
             if not user_input.get(CONF_MQTT_USERNAME):
@@ -266,6 +276,7 @@ class RltechConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             user_input[CONF_BASE_URL] = _host_to_base_url(user_input[CONF_BASE_URL])
+            _apply_derived_fields(user_input)
             if not user_input.get(CONF_PASSWORD):
                 user_input = {
                     key: value
@@ -286,14 +297,6 @@ class RltechConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 }
             if not user_input.get(CONF_AP_USERNAME):
                 user_input[CONF_AP_USERNAME] = DEFAULT_AP_USERNAME
-            if not user_input.get(CONF_MQTT_HOST):
-                user_input[CONF_MQTT_HOST] = _base_url_to_host(
-                    user_input[CONF_BASE_URL]
-                )
-            else:
-                user_input[CONF_MQTT_HOST] = _base_url_to_host(
-                    user_input[CONF_MQTT_HOST]
-                )
             if not user_input.get(CONF_MQTT_PASSWORD):
                 user_input = {
                     key: value

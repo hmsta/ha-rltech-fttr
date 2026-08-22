@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 import logging
+import re
 from urllib.parse import urlsplit
 
 from homeassistant.config_entries import ConfigEntry
@@ -258,7 +259,7 @@ def _legacy_hosts_from_entry(entry: ConfigEntry) -> list[str]:
     host = parsed.hostname or parsed.netloc.split(":", 1)[0] or base_url
     hosts = [host]
     extra_hosts = entry.data.get(CONF_LEGACY_HOSTS, "")
-    for item in str(extra_hosts).replace("\n", ",").split(","):
+    for item in re.split(r"[\s,]+", str(extra_hosts)):
         item = item.strip()
         if not item:
             continue
