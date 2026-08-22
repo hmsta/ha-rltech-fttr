@@ -6,6 +6,7 @@ from homeassistant.const import Platform
 
 DOMAIN = "rltech_fttr"
 PLATFORMS = [Platform.SENSOR, Platform.BUTTON]
+SIGNAL_STATIONS_CHANGED = f"{DOMAIN}_stations_changed"
 
 STATION_CARD_URL = "/rltech_fttr/rltech-fttr-station-table-card.js"
 STATION_CARD_FILENAME = "rltech-fttr-station-table-card.js"

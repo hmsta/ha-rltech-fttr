@@ -7,11 +7,12 @@ from typing import Any, Callable
 import voluptuous as vol
 
 from homeassistant.components import websocket_api
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers import entity_registry as er
 
-from .const import DOMAIN
+from .const import DOMAIN, SIGNAL_STATIONS_CHANGED
 from .ap_inventory import ap_rows
 from .identifiers import AP_SENSOR_KEYS, ap_sensor_unique_id
 from .station_inventory import station_rows
@@ -23,6 +24,7 @@ def async_setup_websocket(hass: HomeAssistant) -> None:
     """Register RLTech FTTR websocket commands."""
     websocket_api.async_register_command(hass, websocket_get_entries)
     websocket_api.async_register_command(hass, websocket_get_stations)
+    websocket_api.async_register_command(hass, websocket_subscribe_station_changes)
     websocket_api.async_register_command(hass, websocket_get_access_points)
 
 
@@ -125,6 +127,45 @@ async def websocket_get_stations(
             **{key: value for key, value in result.items() if key != "rows"},
         },
     )
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "rltech_fttr/subscribe_station_changes",
+        vol.Required("entry_id"): str,
+    }
+)
+@websocket_api.async_response
+async def websocket_subscribe_station_changes(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict,
+) -> None:
+    """Subscribe to tiny station-inventory changed events for one config entry."""
+    entry_id = msg["entry_id"]
+    coordinator = hass.data.get(DOMAIN, {}).get(entry_id)
+    if coordinator is None:
+        connection.send_error(
+            msg["id"], "not_found", "Unknown RLTech FTTR config entry"
+        )
+        return
+
+    @callback
+    def forward_station_change(changed_at) -> None:
+        connection.send_event(
+            msg["id"],
+            {
+                "entry_id": entry_id,
+                "changed_at": changed_at.isoformat() if changed_at else None,
+            },
+        )
+
+    connection.subscriptions[msg["id"]] = async_dispatcher_connect(
+        hass,
+        f"{SIGNAL_STATIONS_CHANGED}_{entry_id}",
+        forward_station_change,
+    )
+    connection.send_result(msg["id"])
 
 
 @websocket_api.websocket_command(

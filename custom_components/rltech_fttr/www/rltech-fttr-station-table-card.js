@@ -23,11 +23,16 @@ class RltechFttrStationTableCard extends HTMLElement {
     this._fetchInFlight = false;
     this._fetchQueued = false;
     this._refreshTimer = null;
+    this._liveRefreshTimer = null;
     this._shellRendered = false;
     this._isMobile = false;
     this._mediaQuery = null;
     this._entryResolving = null;
     this._resolvedEntryId = "";
+    this._stationChangeUnsub = null;
+    this._subscribedEntryId = "";
+    this._lastLiveRefresh = 0;
+    this._pendingLiveRefresh = false;
     this._preferencesLoadedKey = "";
     this._activeDialog = null;
   }
@@ -39,6 +44,9 @@ class RltechFttrStationTableCard extends HTMLElement {
       page_size_options: [25, 50, 100],
       remember_preferences: true,
       refresh_interval_ms: 60000,
+      live_refresh_when_narrowed: true,
+      live_refresh_debounce_ms: 1500,
+      live_refresh_min_interval_ms: 5000,
       search_debounce_ms: 150,
       columns: this._defaultColumns(),
       mobile_columns: this._defaultMobileColumns(),
@@ -83,6 +91,11 @@ class RltechFttrStationTableCard extends HTMLElement {
       window.clearTimeout(this._refreshTimer);
       this._refreshTimer = null;
     }
+    if (this._liveRefreshTimer) {
+      window.clearTimeout(this._liveRefreshTimer);
+      this._liveRefreshTimer = null;
+    }
+    this._unsubscribeStationChanges();
   }
 
   static getStubConfig() {
@@ -353,6 +366,7 @@ class RltechFttrStationTableCard extends HTMLElement {
       if (!entryId) {
         return;
       }
+      this._ensureStationChangeSubscription(entryId);
       const result = await this._hass.callWS({
         type: "rltech_fttr/get_stations",
         entry_id: entryId,
@@ -390,12 +404,85 @@ class RltechFttrStationTableCard extends HTMLElement {
     return Number.isFinite(configured) && configured >= 10000 ? configured : 60000;
   }
 
+  _liveRefreshDebounceMs() {
+    const configured = Number(this._config?.live_refresh_debounce_ms);
+    return Number.isFinite(configured) && configured >= 250 ? configured : 1500;
+  }
+
+  _liveRefreshMinIntervalMs() {
+    const configured = Number(this._config?.live_refresh_min_interval_ms);
+    return Number.isFinite(configured) && configured >= 1000 ? configured : 5000;
+  }
+
+  _ensureStationChangeSubscription(entryId) {
+    if (!this._hass || !entryId || this._subscribedEntryId === entryId) {
+      return;
+    }
+    this._unsubscribeStationChanges();
+    this._subscribedEntryId = entryId;
+    this._hass
+      .connection
+      .subscribeMessage(
+        () => this._handleStationChanged(),
+        {
+          type: "rltech_fttr/subscribe_station_changes",
+          entry_id: entryId,
+        },
+      )
+      .then((unsubscribe) => {
+        if (this._subscribedEntryId !== entryId) {
+          unsubscribe();
+          return;
+        }
+        this._stationChangeUnsub = unsubscribe;
+      })
+      .catch((err) => {
+        this._subscribedEntryId = "";
+        this._error = err.message || String(err);
+        this._refreshTable();
+      });
+  }
+
+  _unsubscribeStationChanges() {
+    if (this._stationChangeUnsub) {
+      this._stationChangeUnsub();
+      this._stationChangeUnsub = null;
+    }
+    this._subscribedEntryId = "";
+  }
+
+  _handleStationChanged() {
+    if (!this._config?.live_refresh_when_narrowed || !this._hasActiveFilters()) {
+      return;
+    }
+    this._pendingLiveRefresh = true;
+    if (this._liveRefreshTimer) {
+      return;
+    }
+    const elapsed = Date.now() - this._lastLiveRefresh;
+    const wait = Math.max(
+      this._liveRefreshDebounceMs(),
+      this._liveRefreshMinIntervalMs() - elapsed,
+    );
+    this._liveRefreshTimer = window.setTimeout(() => {
+      this._liveRefreshTimer = null;
+      if (!this._pendingLiveRefresh || !this._hasActiveFilters()) {
+        this._pendingLiveRefresh = false;
+        return;
+      }
+      this._pendingLiveRefresh = false;
+      this._lastLiveRefresh = Date.now();
+      this._scheduleFetch(true);
+    }, wait);
+  }
+
   async _entryId() {
     if (this._config.entry_id) {
       this._loadPreferences();
       if (this._shellRendered) {
         this._refreshPageSize();
       }
+      this._ensureStationChangeSubscription(this._config.entry_id);
       return this._config.entry_id;
     }
     if (!this._entryResolving) {
@@ -410,6 +497,7 @@ class RltechFttrStationTableCard extends HTMLElement {
         this._refreshColumnPicker();
         this._renderHeaders();
         this._refreshPageSize();
+        this._ensureStationChangeSubscription(this._resolvedEntryId);
         return this._resolvedEntryId;
       }
       this._error = entries.length

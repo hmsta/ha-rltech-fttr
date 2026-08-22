@@ -154,6 +154,11 @@ remembered in the current browser's local storage. Search text is intentionally
 not remembered. On phone-sized screens the card switches from a wide table to a
 compact row layout using `mobile_columns`.
 
+When MQTT is enabled, the station card can subscribe to lightweight station
+change notifications. The backend sends only a dirty event, not station rows.
+The card auto-refetches only when the current view is narrowed by search text
+or filters, with debounce/throttling to avoid full-table churn.
+
 ## AP table card
 
 Add an AP inventory card:

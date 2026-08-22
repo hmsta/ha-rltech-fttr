@@ -10,6 +10,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.helpers.update_coordinator import UpdateFailed
@@ -48,6 +49,7 @@ from .const import (
     DEFAULT_ENABLE_STATION_POLLING,
     DEFAULT_STATION_RETENTION,
     DOMAIN,
+    SIGNAL_STATIONS_CHANGED,
     CONF_STATION_RETENTION,
 )
 from .hostname_enrichment import enrich_from_home_assistant_dhcp
@@ -181,6 +183,12 @@ class RltechCoordinator(DataUpdateCoordinator[RltechData]):
             return
         self._last_data = data
         self.async_set_updated_data(data)
+        if cmd == "XReport_StaList":
+            async_dispatcher_send(
+                self.hass,
+                f"{SIGNAL_STATIONS_CHANGED}_{self.config_entry.entry_id}",
+                now,
+            )
 
     def _maybe_enrich_mqtt_station_hostnames(
         self, data: RltechData, now: datetime
