@@ -583,6 +583,61 @@ def test_mqtt_live_overlay_keeps_http_station_when_newer() -> None:
     assert merged.stations[mac].rssi == -55
 
 
+def test_mqtt_live_overlay_does_not_resurrect_unchanged_expired_station() -> None:
+    seen_time = datetime(2026, 8, 21, 0, 0, tzinfo=UTC)
+    mac = "7C:45:D0:4C:17:59"
+    previous = models.RltechData(
+        stations={
+            mac: models.RltechStation(
+                mac=mac,
+                reported_online=True,
+                home=True,
+                last_seen=seen_time,
+                hostname="stale-client",
+            )
+        }
+    )
+    current = models.RltechData(
+        stations={
+            mac: models.RltechStation(
+                mac=mac,
+                reported_online=True,
+                home=True,
+                last_seen=seen_time,
+                hostname="stale-client",
+            )
+        }
+    )
+    fresh = models.RltechData(stations={})
+
+    merged = mqtt.preserve_live_overlay(current, fresh, previous)
+
+    assert mac not in merged.stations
+
+
+def test_mqtt_live_overlay_keeps_station_changed_during_poll() -> None:
+    seen_time = datetime(2026, 8, 21, 0, 0, tzinfo=UTC)
+    mqtt_time = seen_time + timedelta(seconds=30)
+    mac = "7C:45:D0:4C:17:59"
+    previous = models.RltechData(stations={})
+    current = models.RltechData(
+        stations={
+            mac: models.RltechStation(
+                mac=mac,
+                reported_online=True,
+                home=True,
+                last_seen=mqtt_time,
+                hostname="mqtt-client",
+            )
+        }
+    )
+    fresh = models.RltechData(stations={})
+
+    merged = mqtt.preserve_live_overlay(current, fresh, previous)
+
+    assert merged.stations[mac].last_seen == mqtt_time
+
+
 def test_mqtt_live_overlay_preserves_ap_health_without_overwriting_optics() -> None:
     now = datetime(2026, 8, 21, 12, 0, tzinfo=UTC)
     mac = "44:95:3B:B8:DC:D0"

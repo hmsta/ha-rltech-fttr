@@ -379,7 +379,7 @@ def preserve_live_overlay(
 ) -> RltechData:
     """Keep MQTT-fed live fields when an HTTP poll returns an older snapshot."""
     aps = _preserve_live_ap_fields(current, fresh, previous)
-    stations = _preserve_live_station_fields(current, fresh)
+    stations = _preserve_live_station_fields(current, fresh, previous)
     ap_details = _preserve_live_ap_detail_fields(current, fresh)
     return replace(fresh, aps=aps, stations=stations, ap_details=ap_details)
 
@@ -405,13 +405,17 @@ def _preserve_live_ap_fields(
 
 
 def _preserve_live_station_fields(
-    current: RltechData, fresh: RltechData
+    current: RltechData, fresh: RltechData, previous: RltechData | None
 ) -> dict[str, RltechStation]:
     """Return station rows with the newest live station records kept."""
     stations = dict(fresh.stations)
     for mac, current_station in current.stations.items():
         fresh_station = stations.get(mac)
-        if fresh_station is None or _station_is_newer(current_station, fresh_station):
+        if fresh_station is None:
+            if previous is None or current_station != previous.stations.get(mac):
+                stations[mac] = current_station
+            continue
+        if _station_is_newer(current_station, fresh_station):
             stations[mac] = current_station
             continue
         preserved = {}
