@@ -790,6 +790,47 @@ def test_mqtt_subscribe_accepts_suback() -> None:
     asyncio.run(run())
 
 
+def test_mqtt_connect_packet_uses_longer_keepalive(monkeypatch) -> None:
+    class FakeWriter:
+        def __init__(self) -> None:
+            self.written = b""
+
+        def write(self, data: bytes) -> None:
+            self.written += data
+
+        async def drain(self) -> None:
+            return None
+
+        def get_extra_info(self, _name):
+            return None
+
+    async def fake_open_connection(*_args, **_kwargs):
+        reader = asyncio.StreamReader()
+        reader.feed_data(mqtt._packet(0x20, b"\x00\x00"))
+        return reader, writer
+
+    async def run() -> None:
+        monkeypatch.setattr(mqtt.asyncio, "open_connection", fake_open_connection)
+        monkeypatch.setattr(mqtt, "build_psk_context", lambda *_args: None)
+        client = mqtt.AsyncPskMqttClient(
+            "olt",
+            8883,
+            "admin",
+            "123456",
+            psk_identity="admin",
+            psk_hex="61646D696E21402324",
+            client_id="test",
+        )
+
+        await client.connect()
+
+        assert writer.written.startswith(b"\x10")
+        assert b"\x00<" in writer.written
+
+    writer = FakeWriter()
+    asyncio.run(run())
+
+
 def test_dhcp_match_summary_counts_fillable_missing_hostnames() -> None:
     data = api.normalize_snapshot(
         [payload([])],

@@ -22,7 +22,8 @@ TOPIC_AP_NOTIFY = "/homeGatewayProxy/v2/AP2AC/messsage/notify"
 TOPIC_AP_ONLINE = "/homeGatewayProxy/v2/AP/messsage/online"
 TOPIC_AP_OFFLINE = "/homeGatewayProxy/v2/AP/messsage/offline"
 MQTT_TOPICS = [TOPIC_AP_NOTIFY, TOPIC_AP_ONLINE, TOPIC_AP_OFFLINE]
-MQTT_KEEPALIVE = 30
+MQTT_KEEPALIVE = 60
+MQTT_PING_INTERVAL = 30
 LAST_BOOT_STABILITY = timedelta(seconds=60)
 BANDWIDTH_MAP = {
     1: "20 MHz",
@@ -730,7 +731,7 @@ class RltechMqttManager:
         while not self._stopped.is_set():
             try:
                 message = await asyncio.wait_for(
-                    client.read_message(), timeout=MQTT_KEEPALIVE
+                    client.read_message(), timeout=MQTT_PING_INTERVAL
                 )
             except TimeoutError:
                 await client.ping()
