@@ -191,14 +191,19 @@ class RltechCoordinator(DataUpdateCoordinator[RltechData]):
             return
         if data is self._last_data:
             return
-        self._last_data = data
-        self.async_set_updated_data(data)
+        self._async_set_live_overlay_data(data)
         if cmd == "XReport_StaList":
             async_dispatcher_send(
                 self.hass,
                 f"{SIGNAL_STATIONS_CHANGED}_{self.config_entry.entry_id}",
                 now,
             )
+
+    def _async_set_live_overlay_data(self, data: RltechData) -> None:
+        """Publish MQTT overlay data without delaying the next HTTP poll."""
+        self._last_data = data
+        self.data = data
+        self.async_update_listeners()
 
     def _maybe_enrich_mqtt_station_hostnames(
         self, data: RltechData, now: datetime
