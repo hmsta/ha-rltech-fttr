@@ -122,6 +122,17 @@ class RltechFttrApTableCard extends HTMLElement {
       ["upgrade_flag", "Upgrade"],
       ["optical_rx_power", "Rx dBm", null, null, "optical_rx_power"],
       ["optical_tx_power", "Tx dBm", null, null, "optical_tx_power"],
+      ["cpu_usage", "CPU %", null, null, "cpu_usage"],
+      ["cpu_temperature", "CPU temp", null, null, "cpu_temperature"],
+      ["memory_usage", "Memory %", null, null, "memory_usage"],
+      ["flash_usage", "Flash %", null, null, "flash_usage"],
+      [
+        "last_boot",
+        "Last boot",
+        (row) => this._escape(this._formatDateTime(row.last_boot)),
+        (row) => row.last_boot,
+        "last_boot",
+      ],
       [
         "reg_off_time",
         "Reg/Off Time",
