@@ -190,6 +190,7 @@ class RltechLegacyOltSource:
     olt_status: RltechOltStatus | None = None
     lan_ports: dict[int, RltechLanPort] = field(default_factory=dict)
     lanpon_ports: dict[int, RltechLanPonPort] = field(default_factory=dict)
+    last_success: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -204,4 +205,6 @@ class RltechData:
     lanpon_ports: dict[int, RltechLanPonPort] = field(default_factory=dict)
     legacy_sources: dict[str, RltechLegacyOltSource] = field(default_factory=dict)
     last_success: datetime | None = None
+    last_success_8080: datetime | None = None
+    last_success_80: datetime | None = None
     poll_duration_ms: int | None = None

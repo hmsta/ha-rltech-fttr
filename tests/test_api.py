@@ -1617,6 +1617,118 @@ def test_fetch_snapshot_final_logout_failure_returns_successful_data() -> None:
     asyncio.run(run())
 
 
+def test_fetch_snapshot_uses_legacy_status_when_8080_is_busy() -> None:
+    async def run() -> None:
+        previous = models.RltechData(
+            aps={
+                "44:95:3B:B8:DC:E0": models.RltechAp(
+                    mac="44:95:3B:B8:DC:E0",
+                    sn="RLGM3BB8DCE0",
+                    alias="House11_Office",
+                    online=True,
+                )
+            },
+            stations={
+                "7C:45:D0:4C:18:40": models.RltechStation(
+                    mac="7C:45:D0:4C:18:40",
+                    reported_online=True,
+                    home=True,
+                )
+            },
+            last_success=datetime(2026, 8, 30, 11, 1, tzinfo=UTC),
+            last_success_8080=datetime(2026, 8, 30, 11, 1, tzinfo=UTC),
+            last_success_80=datetime(2026, 8, 30, 11, 1, tzinfo=UTC),
+        )
+        client = api.RltechClient(
+            "http://olt:8080",
+            "u",
+            "p",
+            legacy_base_urls=["http://olt", "http://slave"],
+            legacy_username="admin",
+            legacy_password="admin",
+        )
+        session = FakeSession(
+            [
+                FakeResponse(200, json.dumps({"Logged": "1"})),
+                FakeResponse(200, ""),
+                FakeResponse(
+                    200,
+                    "X('RH8002GR','V5.0.1-51675','','','','','','44:95:3B:B9:D3:F0','19 Days 18 Hour 44 Min 43 Sec','8','20','RL2024092600019');",
+                ),
+                FakeResponse(200, "showPortInfo('LAN-1','1','Full','1000M','1','2');"),
+                FakeResponse(200, "showLANPonInfo('LANPON1','disable','enable','enable','up','2.73 dBm','-20.48','49.83 ℃','3.08 mA','38.56 V');"),
+                FakeResponse(200, ""),
+                FakeResponse(200, ""),
+                FakeResponse(200, ""),
+                FakeResponse(200, ""),
+                FakeResponse(
+                    200,
+                    "X('RH8002GR','V5.0.1-51675','','','','','','44:95:3B:B9:D3:F1','19 Days 18 Hour 44 Min 43 Sec','6','21','RL2024092600020');",
+                ),
+                FakeResponse(200, "showPortInfo('LAN-1','1','Full','1000M','3','4');"),
+                FakeResponse(200, "showLANPonInfo('LANPON1','disable','enable','enable','up','2.90 dBm','-21.01','48.10 ℃','3.08 mA','37.00 V');"),
+                FakeResponse(200, ""),
+                FakeResponse(200, ""),
+            ]
+        )
+
+        data = await client.fetch_snapshot(session, previous=previous)
+
+        assert data.aps == previous.aps
+        assert data.stations == previous.stations
+        assert data.last_success == previous.last_success
+        assert data.last_success_8080 == previous.last_success_8080
+        assert data.last_success_80 is not None
+        assert data.last_success_80 > previous.last_success_80
+        assert data.olt_status.cpu_usage == 8
+        assert data.legacy_sources["olt"].olt_status.cpu_usage == 8
+        assert data.legacy_sources["olt"].last_success == data.last_success_80
+        assert data.legacy_sources["slave"].olt_status.cpu_usage == 6
+        assert data.legacy_sources["slave"].last_success == data.last_success_80
+        assert data.lanpon_ports[1].temperature == 49.83
+        assert session.calls[0][1].endswith("/check_auth.json")
+        assert any("/runinfo.asp" in call[1] for call in session.calls)
+
+    asyncio.run(run())
+
+
+def test_fetch_snapshot_raises_when_8080_and_legacy_both_fail() -> None:
+    async def run() -> None:
+        previous = models.RltechData(
+            aps={
+                "44:95:3B:B8:DC:E0": models.RltechAp(
+                    mac="44:95:3B:B8:DC:E0",
+                    sn="RLGM3BB8DCE0",
+                    alias="House11_Office",
+                    online=True,
+                )
+            },
+            last_success=datetime(2026, 8, 30, 11, 1, tzinfo=UTC),
+        )
+        client = api.RltechClient(
+            "http://olt:8080",
+            "u",
+            "p",
+            legacy_base_urls=["http://olt"],
+            legacy_username="admin",
+            legacy_password="admin",
+        )
+        session = FakeSession(
+            [
+                FakeResponse(200, json.dumps({"Logged": "1"})),
+                FakeResponse(500, ""),
+            ]
+        )
+
+        try:
+            await client.fetch_snapshot(session, previous=previous)
+        except api.AccountBusyError:
+            return
+        raise AssertionError("expected original 8080 error")
+
+    asyncio.run(run())
+
+
 def test_fetch_snapshot_can_skip_ap_and_station_pages() -> None:
     async def run() -> None:
         client = api.RltechClient("http://olt", "u", "p")
@@ -1697,9 +1809,10 @@ def html_payload(name: str, body: dict) -> str:
 
 
 class FakeResponse:
-    def __init__(self, status: int, body: str) -> None:
+    def __init__(self, status: int, body: str, headers: dict[str, str] | None = None) -> None:
         self.status = status
         self.body = body
+        self.headers = headers or {}
 
     async def __aenter__(self):
         return self

@@ -101,6 +101,9 @@ async def async_get_config_entry_diagnostics(
                     "olt_status_present": source.olt_status is not None,
                     "lan_port_count": len(source.lan_ports),
                     "lanpon_port_count": len(source.lanpon_ports),
+                    "last_success": source.last_success.isoformat()
+                    if source.last_success
+                    else None,
                 }
                 for host, source in data.legacy_sources.items()
             },
@@ -109,6 +112,12 @@ async def async_get_config_entry_diagnostics(
             ),
             "last_success": data.last_success.isoformat()
             if data.last_success
+            else None,
+            "last_success_8080": data.last_success_8080.isoformat()
+            if data.last_success_8080
+            else None,
+            "last_success_80": data.last_success_80.isoformat()
+            if data.last_success_80
             else None,
             "poll_duration_ms": data.poll_duration_ms,
             "olt_status_present": data.olt_status is not None,

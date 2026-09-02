@@ -950,6 +950,7 @@ def normalize_snapshot(
         lan_ports=parse_lan_ports(user_html) if user_html is not None else {},
         lanpon_ports=parse_lanpon_ports(user_html) if user_html is not None else {},
         last_success=now,
+        last_success_8080=now,
         poll_duration_ms=poll_duration_ms,
     )
 
@@ -1608,6 +1609,7 @@ class RltechClient:
                 olt_status=source_status,
                 lan_ports=source_lan,
                 lanpon_ports=source_lanpon,
+                last_success=now,
             )
             by_sn.update(source_onus)
 
@@ -1635,47 +1637,75 @@ class RltechClient:
         scan_interval: int = 60,
         local_timezone: tzinfo = UTC,
     ) -> RltechData:
-        """Run one serialized login/fetch/logout transaction."""
+        """Fetch one snapshot, keeping 8080 inventory and port-80 status independent."""
         async with self._lock:
             started = time.monotonic()
-            if self.token is not None:
-                try:
-                    await self.logout(session)
-                except Exception as exc:  # noqa: BLE001 - stale cleanup must not block refresh
-                    _LOGGER.warning(
-                        "RLTech stale session cleanup failed before login: %s", exc
-                    )
-                    self.token = None
+            now = datetime.now(UTC)
+            ap_pages: list[dict[str, Any]] = []
+            station_pages: list[dict[str, Any]] = []
+            primary_error: Exception | None = None
+            primary_attempted = include_ap_inventory or include_station_inventory
 
-            await self.login(session)
-            try:
-                ap_pages = (
-                    await self._fetch_all(self.fetch_ap_page, session)
-                    if include_ap_inventory
-                    else []
-                )
-                aps = _normalize_ap_payloads(ap_pages)
-                station_pages = (
-                    await self._fetch_all(self.fetch_station_page, session)
-                    if include_station_inventory
-                    else []
-                )
-                now = datetime.now(UTC)
-                olt_status = None
-                lan_ports: dict[int, RltechLanPort] = {}
-                lanpon_ports: dict[int, RltechLanPonPort] = {}
-                ap_details: dict[str, RltechApDetail] = {}
-                legacy_sources: dict[str, RltechLegacyOltSource] = {}
-                if include_hardware_status:
-                    olt_status, lan_ports, lanpon_ports, ap_details, legacy_sources = (
-                        await self._fetch_legacy_snapshot(
-                            session,
-                            aps,
-                            previous,
-                            now=now,
-                            local_timezone=local_timezone,
+            if primary_attempted:
+                if self.token is not None:
+                    try:
+                        await self.logout(session)
+                    except Exception as exc:  # noqa: BLE001 - stale cleanup must not block refresh
+                        _LOGGER.warning(
+                            "RLTech stale session cleanup failed before login: %s", exc
                         )
+                        self.token = None
+
+                try:
+                    await self.login(session)
+                    ap_pages = (
+                        await self._fetch_all(self.fetch_ap_page, session)
+                        if include_ap_inventory
+                        else []
                     )
+                    station_pages = (
+                        await self._fetch_all(self.fetch_station_page, session)
+                        if include_station_inventory
+                        else []
+                    )
+                except AuthenticationError:
+                    raise
+                except Exception as exc:  # noqa: BLE001 - port 80 can still refresh
+                    _LOGGER.warning("Unable to fetch RLTech 8080 inventory: %s", exc)
+                    primary_error = exc
+                finally:
+                    try:
+                        await asyncio.shield(self.logout(session))
+                    except Exception as exc:
+                        _LOGGER.warning("RLTech logout cleanup failed: %s", exc)
+
+            aps = (
+                _normalize_ap_payloads(ap_pages)
+                if primary_error is None
+                else previous.aps
+                if previous is not None
+                else {}
+            )
+            olt_status = None
+            lan_ports: dict[int, RltechLanPort] = {}
+            lanpon_ports: dict[int, RltechLanPonPort] = {}
+            ap_details: dict[str, RltechApDetail] = {}
+            legacy_sources: dict[str, RltechLegacyOltSource] = {}
+            if include_hardware_status:
+                olt_status, lan_ports, lanpon_ports, ap_details, legacy_sources = (
+                    await self._fetch_legacy_snapshot(
+                        session,
+                        aps,
+                        previous,
+                        now=now,
+                        local_timezone=local_timezone,
+                    )
+                )
+            legacy_success = any(
+                source.last_success == now for source in legacy_sources.values()
+            )
+
+            if primary_error is None:
                 data = normalize_snapshot(
                     ap_pages,
                     station_pages,
@@ -1687,15 +1717,40 @@ class RltechClient:
                     poll_duration_ms=int((time.monotonic() - started) * 1000),
                     ap_details=ap_details,
                 )
-                return replace(
-                    data,
-                    olt_status=_stabilize_olt_status(olt_status, previous),
-                    lan_ports=lan_ports,
-                    lanpon_ports=lanpon_ports,
-                    legacy_sources=legacy_sources,
+                if not primary_attempted:
+                    data = replace(
+                        data,
+                        last_success=previous.last_success if previous else None,
+                        last_success_8080=(
+                            previous.last_success_8080 if previous else None
+                        ),
+                    )
+            elif previous is not None and legacy_success:
+                data = replace(
+                    previous,
+                    poll_duration_ms=int((time.monotonic() - started) * 1000),
                 )
-            finally:
-                try:
-                    await asyncio.shield(self.logout(session))
-                except Exception as exc:
-                    _LOGGER.warning("RLTech logout cleanup failed: %s", exc)
+            elif include_hardware_status and (olt_status is not None or legacy_sources):
+                data = RltechData(
+                    aps={},
+                    ap_details=ap_details,
+                    stations={},
+                    last_success_80=now if legacy_success else None,
+                    poll_duration_ms=int((time.monotonic() - started) * 1000),
+                )
+            else:
+                raise primary_error
+
+            return replace(
+                data,
+                olt_status=(
+                    _stabilize_olt_status(olt_status, previous)
+                    if olt_status is not None
+                    else data.olt_status
+                ),
+                lan_ports=lan_ports or data.lan_ports,
+                lanpon_ports=lanpon_ports or data.lanpon_ports,
+                legacy_sources=legacy_sources or data.legacy_sources,
+                last_success_80=now if legacy_success else data.last_success_80,
+                ap_details=ap_details or data.ap_details,
+            )
