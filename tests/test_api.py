@@ -1547,6 +1547,76 @@ def test_logout_after_success_and_failure_retains_token() -> None:
     asyncio.run(run_failed_logout())
 
 
+def test_fetch_snapshot_stale_token_cleanup_does_not_block_refresh() -> None:
+    async def run() -> None:
+        client = api.RltechClient("http://olt", "u", "p")
+        client.token = "stale"
+        session = FakeSession(
+            [
+                FakeResponse(500, ""),
+                FakeResponse(
+                    200,
+                    json.dumps(
+                        {
+                            "Logged": "0",
+                            "Privilege": "1",
+                            "Active": "1",
+                            "ecntToken": "fresh",
+                        }
+                    ),
+                ),
+                FakeResponse(200, html_payload("AP_manage", payload([]))),
+                FakeResponse(200, html_payload("STA_manage", payload([]))),
+                FakeResponse(200, ""),
+            ]
+        )
+
+        data = await client.fetch_snapshot(session, include_hardware_status=False)
+
+        assert data.aps == {}
+        assert data.stations == {}
+        assert session.calls[0][0] == "GET"
+        assert session.calls[0][1].endswith("/logout.cgi")
+        assert session.calls[1][0] == "POST"
+        assert session.calls[1][1].endswith("/check_auth.json")
+        assert client.token is None
+
+    asyncio.run(run())
+
+
+def test_fetch_snapshot_final_logout_failure_returns_successful_data() -> None:
+    async def run() -> None:
+        client = api.RltechClient("http://olt", "u", "p")
+        session = FakeSession(
+            [
+                FakeResponse(
+                    200,
+                    json.dumps(
+                        {
+                            "Logged": "0",
+                            "Privilege": "1",
+                            "Active": "1",
+                            "ecntToken": "tok",
+                        }
+                    ),
+                ),
+                FakeResponse(200, html_payload("AP_manage", payload([]))),
+                FakeResponse(200, html_payload("STA_manage", payload([]))),
+                FakeResponse(500, ""),
+            ]
+        )
+
+        data = await client.fetch_snapshot(session, include_hardware_status=False)
+
+        assert data.aps == {}
+        assert data.stations == {}
+        assert session.calls[-1][0] == "GET"
+        assert session.calls[-1][1].endswith("/logout.cgi")
+        assert client.token == "tok"
+
+    asyncio.run(run())
+
+
 def test_fetch_snapshot_can_skip_ap_and_station_pages() -> None:
     async def run() -> None:
         client = api.RltechClient("http://olt", "u", "p")

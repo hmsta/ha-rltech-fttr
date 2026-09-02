@@ -1639,10 +1639,15 @@ class RltechClient:
         async with self._lock:
             started = time.monotonic()
             if self.token is not None:
-                await self.logout(session)
+                try:
+                    await self.logout(session)
+                except Exception as exc:  # noqa: BLE001 - stale cleanup must not block refresh
+                    _LOGGER.warning(
+                        "RLTech stale session cleanup failed before login: %s", exc
+                    )
+                    self.token = None
 
             await self.login(session)
-            primary_error: Exception | None = None
             try:
                 ap_pages = (
                     await self._fetch_all(self.fetch_ap_page, session)
@@ -1689,13 +1694,8 @@ class RltechClient:
                     lanpon_ports=lanpon_ports,
                     legacy_sources=legacy_sources,
                 )
-            except Exception as exc:
-                primary_error = exc
-                raise
             finally:
                 try:
                     await asyncio.shield(self.logout(session))
                 except Exception as exc:
                     _LOGGER.warning("RLTech logout cleanup failed: %s", exc)
-                    if primary_error is None:
-                        raise
