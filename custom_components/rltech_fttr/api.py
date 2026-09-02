@@ -332,6 +332,7 @@ def normalize_station(
         reported_online=reported_online,
         home=reported_online,
         last_seen=now if reported_online else None,
+        first_seen=now,
         ip=_text(row.get("IP")),
         hostname=_text(row.get("HostName")),
         ssid=_text(row.get("SSID")),
@@ -917,6 +918,12 @@ def normalize_snapshot(
         for row in _payload_rows(payload):
             station = normalize_station(row, now=now, aps=aps)
             if station is not None:
+                if previous is not None and station.mac in previous.stations:
+                    station = replace(
+                        station,
+                        first_seen=previous.stations[station.mac].first_seen
+                        or station.first_seen,
+                    )
                 stations[station.mac] = station
 
     if previous is not None:

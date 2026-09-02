@@ -97,6 +97,7 @@ class RltechStation:
     reported_online: bool
     home: bool
     last_seen: datetime | None
+    first_seen: datetime | None = None
     id: str | None = None
     ip: str | None = None
     hostname: str | None = None

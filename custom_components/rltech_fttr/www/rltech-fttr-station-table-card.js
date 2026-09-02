@@ -126,6 +126,7 @@ class RltechFttrStationTableCard extends HTMLElement {
       ["rx_nego_rate", "RX link"],
       ["tx_nego_rate", "TX link"],
       ["uptime", "Uptime", (row) => this._escape(this._formatDuration(row.uptime)), (row) => row.uptime],
+      ["first_seen", "First seen", (row) => this._escape(this._formatLastSeen(row.first_seen)), (row) => row.first_seen],
       ["last_seen", "Last seen", (row) => this._escape(this._formatLastSeen(row.last_seen)), (row) => row.last_seen],
       ["ap_mac", "AP MAC"],
       ["total_count", "Traffic", (row) => this._escape(this._formatTraffic(row.total_count)), (row) => row.total_count],

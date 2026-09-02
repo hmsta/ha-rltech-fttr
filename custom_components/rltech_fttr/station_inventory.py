@@ -23,6 +23,7 @@ def station_to_row(station: RltechStation) -> dict[str, Any]:
         "vlan": station.vlan,
         "uptime": station.uptime,
         "reported_online": station.reported_online,
+        "first_seen": station.first_seen.isoformat() if station.first_seen else None,
         "last_seen": station.last_seen.isoformat() if station.last_seen else None,
         "home": station.home,
         "rx_rate": station.rx_rate,

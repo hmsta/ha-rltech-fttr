@@ -257,6 +257,7 @@ def merge_station_updates(
             mac=update.mac,
             reported_online=update.reported_online,
             home=update.reported_online,
+            first_seen=previous.first_seen if previous else now,
             last_seen=(
                 now
                 if update.reported_online

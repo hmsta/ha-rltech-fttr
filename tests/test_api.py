@@ -156,6 +156,7 @@ def test_normalization_join_and_channel_rules() -> None:
     assert station.ap_alias == "Hall AP"
     assert station.band is None
     assert station.bandwidth == "20/40/80 MHz"
+    assert station.first_seen == now
     assert station.last_seen == now
 
 
@@ -266,6 +267,7 @@ def test_station_inventory_rows_are_serialized_without_entities() -> None:
             "vlan": 40,
             "uptime": 123,
             "reported_online": True,
+            "first_seen": now.isoformat(),
             "last_seen": now.isoformat(),
             "home": True,
             "rx_rate": None,
@@ -441,6 +443,39 @@ def test_mqtt_station_update_preserves_existing_hostname() -> None:
     merged = mqtt.merge_station_updates(data, update, now=now + timedelta(seconds=5))
 
     assert merged.stations[previous.mac].hostname == "dhcp-phone"
+
+
+def test_station_first_seen_is_preserved_across_http_and_mqtt_updates() -> None:
+    first_seen = datetime(2026, 8, 21, 11, 0, tzinfo=UTC)
+    now = datetime(2026, 8, 21, 12, 0, tzinfo=UTC)
+    previous_station = models.RltechStation(
+        mac="7C:45:D0:4C:17:59",
+        reported_online=True,
+        home=True,
+        first_seen=first_seen,
+        last_seen=first_seen,
+        hostname="phone",
+    )
+    previous = models.RltechData(stations={previous_station.mac: previous_station})
+
+    http_data = api.normalize_snapshot(
+        [payload([])],
+        [payload([{"Mac": "7C45D04C1759", "Status": "1"}])],
+        olt_html=None,
+        previous=previous,
+        now=now,
+    )
+    mqtt_data = mqtt.merge_station_updates(
+        http_data,
+        [mqtt.MqttStationUpdate(mac=previous_station.mac, reported_online=True)],
+        now=now + timedelta(seconds=5),
+    )
+
+    assert http_data.stations[previous_station.mac].first_seen == first_seen
+    assert mqtt_data.stations[previous_station.mac].first_seen == first_seen
+    assert mqtt_data.stations[previous_station.mac].last_seen == now + timedelta(
+        seconds=5
+    )
 
 
 def test_mqtt_station_update_preserves_unreported_fields() -> None:
