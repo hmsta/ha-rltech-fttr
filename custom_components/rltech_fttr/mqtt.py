@@ -91,6 +91,7 @@ class RltechMqttStats:
     connected: bool = False
     last_connect: datetime | None = None
     last_message: datetime | None = None
+    last_station_message: datetime | None = None
     reconnect_count: int = 0
     message_counts: Counter[str] = field(default_factory=Counter)
     tls_version: str | None = None
@@ -107,6 +108,11 @@ class RltechMqttStats:
             ),
             "last_message": (
                 self.last_message.isoformat() if self.last_message else None
+            ),
+            "last_station_message": (
+                self.last_station_message.isoformat()
+                if self.last_station_message
+                else None
             ),
             "reconnect_count": self.reconnect_count,
             "message_counts": dict(sorted(self.message_counts.items())),
@@ -265,16 +271,28 @@ def merge_station_updates(
             ssid=update.ssid or (previous.ssid if previous else None),
             ap_mac=update.ap_mac or (previous.ap_mac if previous else None),
             ap_alias=ap_alias or (previous.ap_alias if previous else None),
-            rssi=update.rssi,
-            rx_rate=update.rx_rate,
-            tx_rate=update.tx_rate,
-            rx_nego_rate=update.rx_nego_rate,
-            tx_nego_rate=update.tx_nego_rate,
-            uptime=update.uptime,
-            channel=update.channel,
-            band=update.band,
-            bandwidth=update.bandwidth,
-            vlan=update.vlan,
+            rssi=_new_or_previous(update.rssi, previous.rssi if previous else None),
+            rx_rate=_new_or_previous(
+                update.rx_rate, previous.rx_rate if previous else None
+            ),
+            tx_rate=_new_or_previous(
+                update.tx_rate, previous.tx_rate if previous else None
+            ),
+            rx_nego_rate=_new_or_previous(
+                update.rx_nego_rate, previous.rx_nego_rate if previous else None
+            ),
+            tx_nego_rate=_new_or_previous(
+                update.tx_nego_rate, previous.tx_nego_rate if previous else None
+            ),
+            uptime=_new_or_previous(
+                update.uptime, previous.uptime if previous else None
+            ),
+            channel=_new_or_previous(
+                update.channel, previous.channel if previous else None
+            ),
+            band=update.band or (previous.band if previous else None),
+            bandwidth=update.bandwidth or (previous.bandwidth if previous else None),
+            vlan=_new_or_previous(update.vlan, previous.vlan if previous else None),
             total_count=previous.total_count if previous else None,
             update_time=previous.update_time if previous else None,
         )
@@ -747,6 +765,8 @@ class RltechMqttManager:
                 continue
             now = datetime.now().astimezone()
             self.stats.last_message = now
+            if cmd == "XReport_StaList":
+                self.stats.last_station_message = now
             self.stats.message_counts[cmd] += 1
             if update is not None:
                 self._apply_update(cmd, update, now)
@@ -788,6 +808,11 @@ def _normalize_mac(value: Any) -> str | None:
     if len(text) != 12:
         return None
     return ":".join(text[index : index + 2] for index in range(0, 12, 2))
+
+
+def _new_or_previous(new: Any, previous: Any) -> Any:
+    """Return a new value when reported, otherwise keep the previous value."""
+    return new if new is not None else previous
 
 
 def _normalize_sn(value: Any) -> str | None:

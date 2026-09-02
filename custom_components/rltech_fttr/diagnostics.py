@@ -9,6 +9,7 @@ if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
 
 DOMAIN = "rltech_fttr"
+CONF_STATION_STALE_AFTER = "station_stale_after"
 
 REDACTED = "***REDACTED***"
 REDACT_KEYS = {
@@ -93,6 +94,31 @@ async def async_get_config_entry_diagnostics(
             ),
             "online_ap_count": sum(1 for ap in data.aps.values() if ap.online),
             "station_count": len(data.stations),
+            "station_stale_after": entry.data.get(CONF_STATION_STALE_AFTER),
+            "station_active_count": sum(
+                1 for station in data.stations.values() if station.reported_online
+            ),
+            "station_inactive_count": sum(
+                1 for station in data.stations.values() if not station.reported_online
+            ),
+            "station_oldest_last_seen": (
+                min(
+                    station.last_seen
+                    for station in data.stations.values()
+                    if station.last_seen is not None
+                ).isoformat()
+                if any(
+                    station.last_seen is not None
+                    for station in data.stations.values()
+                )
+                else None
+            ),
+            "station_http_polling_active": getattr(
+                coordinator, "station_http_polling_active", None
+            ),
+            "station_http_polling_reason": getattr(
+                coordinator, "station_http_polling_reason", None
+            ),
             "lan_port_count": len(data.lan_ports),
             "lanpon_port_count": len(data.lanpon_ports),
             "legacy_source_count": len(data.legacy_sources),
@@ -154,6 +180,7 @@ async def async_get_config_entry_diagnostics(
                 "username": entry.data.get("username"),
                 "scan_interval": entry.data.get("scan_interval"),
                 "station_retention": entry.data.get("station_retention"),
+                "station_stale_after": entry.data.get(CONF_STATION_STALE_AFTER),
                 "enable_ap_polling": entry.data.get("enable_ap_polling"),
                 "enable_station_polling": entry.data.get("enable_station_polling"),
                 "enable_hardware_status": entry.data.get("enable_hardware_status"),

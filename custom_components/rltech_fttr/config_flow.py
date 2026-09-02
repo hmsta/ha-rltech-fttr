@@ -32,6 +32,7 @@ from .const import (
     CONF_MQTT_USERNAME,
     CONF_AP_AREA_ID,
     CONF_SCAN_INTERVAL,
+    CONF_STATION_STALE_AFTER,
     CONF_ENABLE_STATION_POLLING,
     DEFAULT_BASE_URL,
     DEFAULT_AP_PASSWORD,
@@ -49,8 +50,10 @@ from .const import (
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_ENABLE_STATION_POLLING,
     DEFAULT_STATION_RETENTION,
+    DEFAULT_STATION_STALE_AFTER,
     DOMAIN,
     MIN_SCAN_INTERVAL,
+    MIN_STATION_STALE_AFTER,
     CONF_STATION_RETENTION,
 )
 
@@ -113,6 +116,16 @@ def _apply_derived_fields(user_input: dict[str, Any]) -> None:
     """Store fixed-port derived fields that are intentionally hidden from UI."""
     user_input[CONF_MQTT_HOST] = _base_url_to_host(user_input[CONF_BASE_URL])
     user_input[CONF_MQTT_PORT] = DEFAULT_MQTT_PORT
+    retention = max(
+        int(user_input.get(CONF_STATION_RETENTION, DEFAULT_STATION_RETENTION)),
+        MIN_STATION_STALE_AFTER,
+    )
+    stale_after = max(
+        int(user_input.get(CONF_STATION_STALE_AFTER, DEFAULT_STATION_STALE_AFTER)),
+        MIN_STATION_STALE_AFTER,
+    )
+    user_input[CONF_STATION_RETENTION] = retention
+    user_input[CONF_STATION_STALE_AFTER] = min(stale_after, retention)
     if user_input.get(CONF_MQTT_PSK):
         user_input[CONF_MQTT_PSK] = _normalize_mqtt_psk(user_input[CONF_MQTT_PSK])
 
@@ -178,7 +191,13 @@ def _schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
             vol.Optional(
                 CONF_STATION_RETENTION,
                 default=defaults.get(CONF_STATION_RETENTION, DEFAULT_STATION_RETENTION),
-            ): vol.All(vol.Coerce(int), vol.Range(min=0)),
+            ): vol.All(vol.Coerce(int), vol.Range(min=MIN_STATION_STALE_AFTER)),
+            vol.Optional(
+                CONF_STATION_STALE_AFTER,
+                default=defaults.get(
+                    CONF_STATION_STALE_AFTER, DEFAULT_STATION_STALE_AFTER
+                ),
+            ): vol.All(vol.Coerce(int), vol.Range(min=MIN_STATION_STALE_AFTER)),
             vol.Optional(
                 CONF_ENABLE_MQTT,
                 default=defaults.get(CONF_ENABLE_MQTT, DEFAULT_ENABLE_MQTT),

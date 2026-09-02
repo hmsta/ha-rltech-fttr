@@ -31,6 +31,7 @@ dhcp_enrichment = load_module("dhcp_enrichment")
 hostname_enrichment = load_module("hostname_enrichment")
 oui_enrichment = load_module("oui_enrichment")
 station_inventory = load_module("station_inventory")
+station_freshness = load_module("station_freshness")
 mqtt = load_module("mqtt")
 
 
@@ -181,8 +182,45 @@ def test_station_retention_keeps_then_expires_station() -> None:
         now=datetime(2026, 8, 20, 1, 5, tzinfo=UTC),
         station_retention=180,
     )
-    assert kept.stations["7C:45:D0:4C:17:59"].reported_online is False
+    assert kept.stations["7C:45:D0:4C:17:59"].reported_online is True
     assert "7C:45:D0:4C:17:59" not in expired.stations
+
+
+def test_station_freshness_marks_stale_then_removes_station() -> None:
+    last_seen = datetime(2026, 8, 20, 1, 0, tzinfo=UTC)
+    station = models.RltechStation(
+        mac="7C:45:D0:4C:17:59",
+        reported_online=True,
+        home=True,
+        last_seen=last_seen,
+        ip="192.168.1.10",
+        hostname="phone",
+        vendor="Example Vendor",
+        ssid="main",
+        rssi=-55,
+    )
+    data = models.RltechData(stations={station.mac: station})
+
+    stale = station_freshness.age_station_data(
+        data,
+        now=last_seen + timedelta(seconds=900),
+        stale_after=900,
+        retention=3600,
+    )
+    expired = station_freshness.age_station_data(
+        data,
+        now=last_seen + timedelta(seconds=3600),
+        stale_after=900,
+        retention=3600,
+    )
+
+    stale_station = stale.stations[station.mac]
+    assert stale_station.reported_online is False
+    assert stale_station.home is False
+    assert stale_station.hostname == "phone"
+    assert stale_station.vendor == "Example Vendor"
+    assert stale_station.rssi == -55
+    assert station.mac not in expired.stations
 
 
 def test_station_inventory_rows_are_serialized_without_entities() -> None:
@@ -403,6 +441,54 @@ def test_mqtt_station_update_preserves_existing_hostname() -> None:
     merged = mqtt.merge_station_updates(data, update, now=now + timedelta(seconds=5))
 
     assert merged.stations[previous.mac].hostname == "dhcp-phone"
+
+
+def test_mqtt_station_update_preserves_unreported_fields() -> None:
+    now = datetime(2026, 8, 21, 12, 0, tzinfo=UTC)
+    previous = models.RltechStation(
+        mac="7C:45:D0:4C:17:59",
+        reported_online=False,
+        home=False,
+        last_seen=now - timedelta(minutes=10),
+        ip="192.168.43.223",
+        hostname="dhcp-phone",
+        vendor="Example Vendor",
+        ssid="wondervillage",
+        rssi=-65,
+        rx_rate=1,
+        tx_rate=2,
+        rx_nego_rate=585,
+        tx_nego_rate=864,
+        uptime=600,
+        channel=40,
+        band="5 GHz",
+        bandwidth="20/40/80 MHz",
+        vlan=40,
+    )
+    data = models.RltechData(stations={previous.mac: previous})
+    update = [mqtt.MqttStationUpdate(mac=previous.mac, reported_online=True)]
+
+    merged = mqtt.merge_station_updates(data, update, now=now)
+
+    station = merged.stations[previous.mac]
+    assert station.reported_online is True
+    assert station.home is True
+    assert station.last_seen == now
+    assert station.hostname == "dhcp-phone"
+    assert station.vendor == "Example Vendor"
+    assert station.rssi == -65
+    assert station.tx_nego_rate == 864
+    assert station.bandwidth == "20/40/80 MHz"
+
+
+def test_mqtt_stats_exposes_last_station_message() -> None:
+    now = datetime(2026, 8, 21, 12, 0, tzinfo=UTC)
+    stats = mqtt.RltechMqttStats(last_message=now, last_station_message=now)
+
+    result = stats.as_dict()
+
+    assert result["last_message"] == now.isoformat()
+    assert result["last_station_message"] == now.isoformat()
 
 
 def test_mqtt_ap_health_updates_known_ap_only_and_stabilizes_boot_time() -> None:
@@ -1633,6 +1719,7 @@ def test_fetch_snapshot_uses_legacy_status_when_8080_is_busy() -> None:
                     mac="7C:45:D0:4C:18:40",
                     reported_online=True,
                     home=True,
+                    last_seen=datetime(2026, 8, 30, 11, 1, tzinfo=UTC),
                 )
             },
             last_success=datetime(2026, 8, 30, 11, 1, tzinfo=UTC),
@@ -1657,7 +1744,6 @@ def test_fetch_snapshot_uses_legacy_status_when_8080_is_busy() -> None:
                 ),
                 FakeResponse(200, "showPortInfo('LAN-1','1','Full','1000M','1','2');"),
                 FakeResponse(200, "showLANPonInfo('LANPON1','disable','enable','enable','up','2.73 dBm','-20.48','49.83 ℃','3.08 mA','38.56 V');"),
-                FakeResponse(200, ""),
                 FakeResponse(200, ""),
                 FakeResponse(200, ""),
                 FakeResponse(200, ""),
@@ -1749,6 +1835,76 @@ def test_fetch_snapshot_can_skip_ap_and_station_pages() -> None:
         assert data.aps == {}
         assert data.stations == {}
         assert all("ap_online_list" not in call[1] for call in session.calls)
+        assert all("ap_wlan_ac_client_list" not in call[1] for call in session.calls)
+
+    asyncio.run(run())
+
+
+def test_fetch_snapshot_preserves_stations_when_station_polling_is_skipped() -> None:
+    async def run() -> None:
+        client = api.RltechClient("http://olt", "u", "p")
+        station = models.RltechStation(
+            mac="7C:45:D0:4C:17:59",
+            reported_online=True,
+            home=True,
+            last_seen=datetime(2026, 8, 21, 12, 0, tzinfo=UTC),
+        )
+        previous = models.RltechData(stations={station.mac: station})
+        session = FakeSession([])
+
+        data = await client.fetch_snapshot(
+            session,
+            previous=previous,
+            include_ap_inventory=False,
+            include_station_inventory=False,
+            include_hardware_status=False,
+        )
+
+        assert data.stations == previous.stations
+        assert session.calls == []
+
+    asyncio.run(run())
+
+
+def test_fetch_snapshot_can_poll_aps_while_skipping_station_pages() -> None:
+    async def run() -> None:
+        client = api.RltechClient("http://olt", "u", "p")
+        station = models.RltechStation(
+            mac="7C:45:D0:4C:17:59",
+            reported_online=True,
+            home=True,
+            last_seen=datetime(2026, 8, 21, 12, 0, tzinfo=UTC),
+        )
+        previous = models.RltechData(stations={station.mac: station})
+        session = FakeSession(
+            [
+                FakeResponse(
+                    200,
+                    json.dumps(
+                        {
+                            "Logged": "0",
+                            "Privilege": "1",
+                            "Active": "1",
+                            "ecntToken": "tok",
+                        }
+                    ),
+                ),
+                FakeResponse(200, html_payload("AP_manage", payload([]))),
+                FakeResponse(200, ""),
+            ]
+        )
+
+        data = await client.fetch_snapshot(
+            session,
+            previous=previous,
+            include_ap_inventory=True,
+            include_station_inventory=False,
+            include_hardware_status=False,
+        )
+
+        assert data.aps == {}
+        assert data.stations == previous.stations
+        assert any("ap_online_list" in call[1] for call in session.calls)
         assert all("ap_wlan_ac_client_list" not in call[1] for call in session.calls)
 
     asyncio.run(run())

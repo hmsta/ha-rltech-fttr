@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import ast
 from collections.abc import Iterable, Sequence
-from dataclasses import asdict, replace
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta, tzinfo
 import html
 import json
@@ -927,13 +927,7 @@ def normalize_snapshot(
                 age = (now - old.last_seen).total_seconds()
                 if age >= station_retention:
                     continue
-                stations[mac] = RltechStation(
-                    **{
-                        **asdict(old),
-                        "reported_online": False,
-                        "home": False,
-                    }
-                )
+                stations[mac] = old
 
     olt_status = parse_olt_status(olt_html, now=now) if olt_html is not None else None
 
@@ -1725,6 +1719,8 @@ class RltechClient:
                             previous.last_success_8080 if previous else None
                         ),
                     )
+                if not include_station_inventory and previous is not None:
+                    data = replace(data, stations=previous.stations)
             elif previous is not None and legacy_success:
                 data = replace(
                     previous,

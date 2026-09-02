@@ -144,6 +144,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = RltechCoordinator(hass, entry, client)
     await async_load_oui()
     await coordinator.async_config_entry_first_refresh()
+    await coordinator.async_start_station_aging()
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -157,6 +158,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     with contextlib.suppress(Exception):
         await coordinator.async_stop_mqtt()
+    with contextlib.suppress(Exception):
+        await coordinator.async_stop_station_aging()
     with contextlib.suppress(Exception):
         await coordinator.client.logout(async_get_clientsession(hass))
     if unload_ok:

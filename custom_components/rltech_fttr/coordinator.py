@@ -9,10 +9,11 @@ from urllib.parse import urlsplit
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
-from homeassistant.core import HomeAssistant
+from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed
-from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.dispatcher import async_dispatcher_send
+from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.helpers.update_coordinator import UpdateFailed
 from homeassistant.util import dt as dt_util
@@ -49,9 +50,11 @@ from .const import (
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_ENABLE_STATION_POLLING,
     DEFAULT_STATION_RETENTION,
+    DEFAULT_STATION_STALE_AFTER,
     DOMAIN,
     SIGNAL_STATIONS_CHANGED,
     CONF_STATION_RETENTION,
+    CONF_STATION_STALE_AFTER,
 )
 from .hostname_enrichment import enrich_from_home_assistant_dhcp
 from .models import RltechData
@@ -67,8 +70,10 @@ from .mqtt import (
     preserve_live_overlay,
 )
 from .oui_enrichment import enrich_station_vendors
+from .station_freshness import age_station_data, effective_station_retention
 
 _LOGGER = logging.getLogger(__name__)
+STATION_AGING_INTERVAL = timedelta(seconds=60)
 
 
 class RltechCoordinator(DataUpdateCoordinator[RltechData]):
@@ -84,6 +89,9 @@ class RltechCoordinator(DataUpdateCoordinator[RltechData]):
         self.client = client
         self._last_data: RltechData | None = None
         self._mqtt_manager: RltechMqttManager | None = None
+        self._station_aging_unsub: CALLBACK_TYPE | None = None
+        self.station_http_polling_active = True
+        self.station_http_polling_reason = "mqtt_disabled"
         self.mqtt_stats = RltechMqttStats(
             enabled=entry.data.get(CONF_ENABLE_MQTT, DEFAULT_ENABLE_MQTT)
         )
@@ -101,19 +109,24 @@ class RltechCoordinator(DataUpdateCoordinator[RltechData]):
         """Fetch FTTR data from the OLT."""
         session = async_get_clientsession(self.hass)
         previous = self._last_data
+        now = datetime.now().astimezone()
+        station_http_active, station_http_reason = self._station_http_polling_decision(
+            now
+        )
+        self.station_http_polling_active = station_http_active
+        self.station_http_polling_reason = station_http_reason
         try:
             data = await self.client.fetch_snapshot(
                 session,
                 previous=previous,
-                station_retention=self.config_entry.data.get(
-                    CONF_STATION_RETENTION, DEFAULT_STATION_RETENTION
-                ),
+                station_retention=self._station_retention(),
                 include_ap_inventory=self.config_entry.data.get(
                     CONF_ENABLE_AP_POLLING, DEFAULT_ENABLE_AP_POLLING
                 ),
                 include_station_inventory=self.config_entry.data.get(
                     CONF_ENABLE_STATION_POLLING, DEFAULT_ENABLE_STATION_POLLING
-                ),
+                )
+                and station_http_active,
                 include_hardware_status=self.config_entry.data.get(
                     CONF_ENABLE_HARDWARE_STATUS,
                     DEFAULT_ENABLE_HARDWARE_STATUS,
@@ -128,7 +141,9 @@ class RltechCoordinator(DataUpdateCoordinator[RltechData]):
         except AccountBusyError as err:
             _LOGGER.warning("RLTech Web UI account is already in use: %s", err)
             if self._last_data is not None:
-                return self._last_data
+                data = self._age_stations(self._last_data, now)
+                self._last_data = data
+                return data
             raise UpdateFailed("RLTech Web UI account is already in use") from err
         except Exception as err:
             raise UpdateFailed(f"Unable to fetch RLTech FTTR data: {err}") from err
@@ -141,8 +156,24 @@ class RltechCoordinator(DataUpdateCoordinator[RltechData]):
         if current is not None and current is not previous:
             data = preserve_live_overlay(current, data, previous)
             data = enrich_station_vendors(data)
+        data = self._age_stations(data, now)
         self._last_data = data
         return data
+
+    async def async_start_station_aging(self) -> None:
+        """Start periodic station aging independent from poll source success."""
+        if self._station_aging_unsub is not None:
+            return
+        self._station_aging_unsub = async_track_time_interval(
+            self.hass, self._async_age_station_rows, STATION_AGING_INTERVAL
+        )
+
+    async def async_stop_station_aging(self) -> None:
+        """Stop periodic station aging."""
+        if self._station_aging_unsub is None:
+            return
+        self._station_aging_unsub()
+        self._station_aging_unsub = None
 
     async def async_start_mqtt(self) -> None:
         """Start optional MQTT live overlay after the first HTTP baseline."""
@@ -164,6 +195,21 @@ class RltechCoordinator(DataUpdateCoordinator[RltechData]):
             await self._mqtt_manager.stop()
             self._mqtt_manager = None
 
+    @callback
+    def _async_age_station_rows(self, now: datetime) -> None:
+        """Age station rows on a timer even when all sources are quiet."""
+        if self._last_data is None:
+            return
+        data = self._age_stations(self._last_data, now)
+        if data is self._last_data:
+            return
+        self._async_set_live_overlay_data(data)
+        async_dispatcher_send(
+            self.hass,
+            f"{SIGNAL_STATIONS_CHANGED}_{self.config_entry.entry_id}",
+            now,
+        )
+
     def async_apply_mqtt_update(
         self,
         cmd: str,
@@ -181,6 +227,7 @@ class RltechCoordinator(DataUpdateCoordinator[RltechData]):
             data = merge_station_updates(data, update, now=now)
             data = self._maybe_enrich_mqtt_station_hostnames(data, now)
             data = enrich_station_vendors(data)
+            data = self._age_stations(data, now)
         elif cmd == "XReport_ExtendInfo" and isinstance(update, MqttApHealthUpdate):
             data = merge_ap_health_update(data, update, now=now)
         elif cmd in {"APOnline", "APOffline"} and isinstance(
@@ -221,6 +268,55 @@ class RltechCoordinator(DataUpdateCoordinator[RltechData]):
                 "Unable to enrich MQTT station hostnames from DHCP cache: %s", err
             )
             return data
+
+    def _age_stations(self, data: RltechData, now: datetime) -> RltechData:
+        """Apply configured station stale/removal rules."""
+        stale_after = self.config_entry.data.get(
+            CONF_STATION_STALE_AFTER, DEFAULT_STATION_STALE_AFTER
+        )
+        return age_station_data(
+            data,
+            now=now,
+            stale_after=stale_after,
+            retention=self._station_retention(),
+        )
+
+    def _station_retention(self) -> int:
+        """Return effective station retention for runtime use."""
+        return effective_station_retention(
+            self.config_entry.data.get(
+                CONF_STATION_RETENTION, DEFAULT_STATION_RETENTION
+            )
+        )
+
+    def _station_http_polling_decision(self, now: datetime) -> tuple[bool, str]:
+        """Return whether HTTP station polling should run this cycle."""
+        if not self.config_entry.data.get(
+            CONF_ENABLE_STATION_POLLING, DEFAULT_ENABLE_STATION_POLLING
+        ):
+            return False, "disabled_by_config"
+        if not self.config_entry.data.get(CONF_ENABLE_MQTT, DEFAULT_ENABLE_MQTT):
+            return True, "mqtt_disabled"
+        if self._last_data is None or not self._last_data.stations:
+            return True, "bootstrap"
+        if not self.mqtt_stats.connected:
+            return True, "mqtt_stale"
+        if self.mqtt_stats.last_station_message is None:
+            return True, "bootstrap"
+        stale_threshold = timedelta(
+            seconds=max(
+                180,
+                int(
+                    self.config_entry.data.get(
+                        CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
+                    )
+                )
+                * 2,
+            )
+        )
+        if now - self.mqtt_stats.last_station_message >= stale_threshold:
+            return True, "mqtt_stale"
+        return False, "disabled_by_mqtt"
 
 
 def build_client(entry: ConfigEntry) -> RltechClient:
