@@ -268,12 +268,12 @@ def _table_result(
             if key in filter_predicates
         )
     ]
+    sort_value = sort_values.get(sort_key, lambda item: item.get(sort_key))
     filtered.sort(
-        key=lambda row: _sort_key(
-            sort_values.get(sort_key, lambda item: item.get(sort_key))(row)
-        ),
+        key=lambda row: _sort_key(sort_value(row))[1:],
         reverse=sort_dir == -1,
     )
+    filtered.sort(key=lambda row: _sort_key(sort_value(row))[0])
 
     page_size = max(0, min(_PAGE_SIZE_MAX, page_size))
     page = max(0, page)
@@ -328,16 +328,16 @@ def _filter_options(
     }
 
 
-def _sort_key(value: Any) -> tuple[int, Any]:
+def _sort_key(value: Any) -> tuple[int, int, Any]:
     """Normalize sort values with empty values last."""
     if value is None or value == "":
-        return (1, "")
+        return (1, 0, "")
     if isinstance(value, bool):
-        return (0, int(value))
+        return (0, 0, int(value))
     try:
-        return (0, float(value))
+        return (0, 0, float(value))
     except (TypeError, ValueError):
-        return (0, str(value).lower())
+        return (0, 1, str(value).lower())
 
 
 def _uplink_label(row: dict[str, Any]) -> str:

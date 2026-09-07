@@ -542,7 +542,7 @@ class RltechFttrStationTableCard extends HTMLElement {
         const col = defs.get(this._sortKey);
         const a = col ? col.sort(left) : left[this._sortKey];
         const b = col ? col.sort(right) : right[this._sortKey];
-        return this._compare(a, b) * this._sortDir;
+        return this._compare(a, b, this._sortDir);
       });
   }
 
@@ -1160,7 +1160,7 @@ class RltechFttrStationTableCard extends HTMLElement {
     return `<button class="icon-button" type="button" data-details="${index}" title="More">More</button>`;
   }
 
-  _compare(a, b) {
+  _compare(a, b, direction = 1) {
     if (a === b) {
       return 0;
     }
@@ -1173,9 +1173,9 @@ class RltechFttrStationTableCard extends HTMLElement {
     const na = Number(a);
     const nb = Number(b);
     if (Number.isFinite(na) && Number.isFinite(nb)) {
-      return na - nb;
+      return (na - nb) * direction;
     }
-    return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: "base" });
+    return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: "base" }) * direction;
   }
 
   _escape(value) {
