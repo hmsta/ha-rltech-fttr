@@ -33,6 +33,7 @@ from .const import (
     DEFAULT_ENABLE_MQTT,
     DOMAIN,
 )
+from .ap_device_registry import ap_device_registry_updates
 from .coordinator import RltechCoordinator
 from .entity import (
     RltechEntity,
@@ -466,9 +467,13 @@ async def async_setup_entry(
     known_legacy_sources: set[str] = set()
     known_legacy_lan_ports: set[tuple[str, int]] = set()
     known_legacy_lanpon_ports: set[tuple[str, int]] = set()
+    last_ap_device_registry_signature: tuple[
+        tuple[str, str | None, str | None], ...
+    ] = ()
 
     @callback
     def add_dynamic_entities() -> None:
+        nonlocal last_ap_device_registry_signature
         if coordinator.data is None:
             return
         new_entities = []
@@ -550,36 +555,62 @@ async def async_setup_entry(
                     )
         if new_entities:
             async_add_entities(new_entities)
-        if new_aps:
-            hass.async_create_task(_async_assign_area_to_ap_devices(hass, entry, new_aps))
+        aps_with_sn = [ap for ap in coordinator.data.aps.values() if ap.sn]
+        ap_device_registry_signature = tuple(
+            sorted((ap.sn or "", ap.version, ap.ip) for ap in aps_with_sn)
+        )
+        if (
+            aps_with_sn
+            and ap_device_registry_signature != last_ap_device_registry_signature
+        ):
+            last_ap_device_registry_signature = ap_device_registry_signature
+
+            async def sync_ap_device_registry() -> None:
+                await _async_sync_ap_device_registry(
+                    hass,
+                    entry,
+                    aps_with_sn,
+                    area_sns={ap.sn for ap in new_aps if ap.sn},
+                )
+
+            hass.async_create_task(sync_ap_device_registry())
 
     add_dynamic_entities()
     entry.async_on_unload(coordinator.async_add_listener(add_dynamic_entities))
 
 
-async def _async_assign_area_to_ap_devices(
+async def _async_sync_ap_device_registry(
     hass: HomeAssistant,
     entry: ConfigEntry,
     aps: list[RltechAp],
+    *,
+    area_sns: set[str],
 ) -> None:
-    """Assign newly created AP devices to the configured default AP area."""
+    """Sync mutable AP device registry metadata."""
     area_id = entry.data.get(CONF_AP_AREA_ID)
-    if not area_id:
-        return
-
     device_registry = dr.async_get(hass)
-    pending = {ap.sn for ap in aps if ap.sn}
+    controller = device_registry.async_get_device(
+        identifiers={(DOMAIN, entry.entry_id)}
+    )
+    controller_device_id = controller.id if controller else None
+    pending = {ap.sn: ap for ap in aps if ap.sn}
     for _ in range(5):
-        remaining = set()
-        for sn in pending:
+        remaining = {}
+        for sn, ap in pending.items():
             device = device_registry.async_get_device(
                 identifiers={(DOMAIN, f"{entry.entry_id}_ap_{sn}")},
             )
             if device is None:
-                remaining.add(sn)
+                remaining[sn] = ap
                 continue
-            if device.area_id is None:
-                device_registry.async_update_device(device.id, area_id=area_id)
+            updates = ap_device_registry_updates(
+                ap,
+                device,
+                controller_device_id=controller_device_id,
+                area_id=area_id if sn in area_sns else None,
+            )
+            if updates:
+                device_registry.async_update_device(device.id, **updates)
 
         if not remaining:
             return

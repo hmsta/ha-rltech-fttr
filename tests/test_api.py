@@ -24,6 +24,7 @@ def load_module(name: str):
 
 
 models = load_module("models")
+ap_device_registry = load_module("ap_device_registry")
 api = load_module("api")
 identifiers = load_module("identifiers")
 ap_inventory = load_module("ap_inventory")
@@ -46,6 +47,67 @@ def payload(rows, total=None, code=0):
 def test_station_trackers_are_not_a_default_platform() -> None:
     const_text = (PKG_ROOT / "const.py").read_text(encoding="utf-8")
     assert "Platform.DEVICE_TRACKER" not in const_text
+
+
+def test_ap_device_registry_updates_mutable_metadata_only() -> None:
+    ap = models.RltechAp(
+        mac="44:95:3B:B8:DC:D0",
+        ip="172.20.11.15",
+        version="V0.0.49",
+        model="RH802GW-AX3",
+        sn="RLGM3BB8DCD0",
+        alias="House53_Living",
+    )
+    device = DummyDevice(
+        sw_version="V0.0.41",
+        configuration_url="http://172.20.11.99",
+        via_device_id="old-controller",
+        area_id=None,
+        name="User name",
+        model="Existing model",
+        serial_number="Existing serial",
+        manufacturer="Existing manufacturer",
+    )
+
+    updates = ap_device_registry.ap_device_registry_updates(
+        ap,
+        device,
+        controller_device_id="controller-1",
+        area_id="network",
+    )
+
+    assert updates == {
+        "sw_version": "V0.0.49",
+        "configuration_url": "http://172.20.11.15",
+        "via_device_id": "controller-1",
+        "area_id": "network",
+    }
+    assert "name" not in updates
+    assert "model" not in updates
+    assert "serial_number" not in updates
+    assert "manufacturer" not in updates
+
+
+def test_ap_device_registry_updates_do_not_clear_missing_values() -> None:
+    ap = models.RltechAp(
+        mac="44:95:3B:B8:DC:D0",
+        ip=None,
+        version=None,
+        sn="RLGM3BB8DCD0",
+    )
+    device = DummyDevice(
+        sw_version="V0.0.49",
+        configuration_url="http://172.20.11.15",
+        via_device_id="controller-1",
+        area_id="network",
+    )
+
+    assert ap_device_registry.ap_device_registry_updates(
+        ap,
+        device,
+        controller_device_id="controller-1",
+        area_id="network",
+    ) == {}
 
 
 def test_eboo_value_vector() -> None:
@@ -2030,3 +2092,8 @@ class FakeSession:
     def get(self, url, **kwargs):
         self.calls.append(("GET", url, kwargs))
         return self.responses.pop(0)
+
+
+class DummyDevice:
+    def __init__(self, **values) -> None:
+        self.__dict__.update(values)
