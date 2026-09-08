@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from functools import cmp_to_key
 from typing import Any, Callable
 
 import voluptuous as vol
@@ -270,10 +271,14 @@ def _table_result(
     ]
     sort_value = sort_values.get(sort_key, lambda item: item.get(sort_key))
     filtered.sort(
-        key=lambda row: _sort_key(sort_value(row))[1:],
-        reverse=sort_dir == -1,
+        key=cmp_to_key(
+            lambda left, right: _compare_sort_values(
+                sort_value(left),
+                sort_value(right),
+                sort_dir,
+            )
+        )
     )
-    filtered.sort(key=lambda row: _sort_key(sort_value(row))[0])
 
     page_size = max(0, min(_PAGE_SIZE_MAX, page_size))
     page = max(0, page)
@@ -328,16 +333,40 @@ def _filter_options(
     }
 
 
-def _sort_key(value: Any) -> tuple[int, int, Any]:
-    """Normalize sort values with empty values last."""
+def _compare_sort_values(left: Any, right: Any, sort_dir: int) -> int:
+    """Compare sort values while keeping empty values last."""
+    left_empty = _is_empty_sort_value(left)
+    right_empty = _is_empty_sort_value(right)
+    if left_empty and right_empty:
+        return 0
+    if left_empty:
+        return 1
+    if right_empty:
+        return -1
+
+    left_key = _sort_key(left)
+    right_key = _sort_key(right)
+    if left_key == right_key:
+        return 0
+    result = -1 if left_key < right_key else 1
+    return result * sort_dir
+
+
+def _is_empty_sort_value(value: Any) -> bool:
+    """Return whether a table sort value should always sort last."""
+    return value is None or value == ""
+
+
+def _sort_key(value: Any) -> tuple[int, Any]:
+    """Normalize non-empty sort values."""
     if value is None or value == "":
-        return (1, 0, "")
+        return (1, "")
     if isinstance(value, bool):
-        return (0, 0, int(value))
+        return (0, int(value))
     try:
-        return (0, 0, float(value))
+        return (0, float(value))
     except (TypeError, ValueError):
-        return (0, 1, str(value).lower())
+        return (1, str(value).lower())
 
 
 def _uplink_label(row: dict[str, Any]) -> str:
