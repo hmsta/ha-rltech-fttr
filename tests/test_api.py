@@ -1351,6 +1351,59 @@ def test_legacy_sources_are_preserved_per_olt() -> None:
     assert data.legacy_sources["172.20.11.2"].lanpon_ports[2].status == "up"
 
 
+def test_legacy_source_boot_time_is_stabilized_per_host() -> None:
+    async def run() -> None:
+        now = datetime.now(UTC)
+        previous_boot = now - timedelta(days=19, hours=18, minutes=44, seconds=42)
+        previous = models.RltechData(
+            legacy_sources={
+                "slave": models.RltechLegacyOltSource(
+                    host="slave",
+                    base_url="http://slave",
+                    olt_status=models.RltechOltStatus(last_boot=previous_boot),
+                )
+            }
+        )
+        client = api.RltechClient(
+            "http://olt:8080",
+            "u",
+            "p",
+            legacy_base_urls=["http://slave"],
+        )
+
+        async def fetch_source(*_args, **_kwargs):
+            return (
+                models.RltechOltStatus(last_boot=previous_boot + timedelta(seconds=1)),
+                {},
+                {},
+                {},
+            )
+
+        client._fetch_legacy_source = fetch_source
+        _, _, _, _, sources = await client._fetch_legacy_snapshot(
+            object(), {}, previous, now=now
+        )
+        assert sources["slave"].olt_status.last_boot == previous_boot
+
+        reboot_time = previous_boot + timedelta(minutes=10)
+
+        async def fetch_rebooted_source(*_args, **_kwargs):
+            return (
+                models.RltechOltStatus(last_boot=reboot_time),
+                {},
+                {},
+                {},
+            )
+
+        client._fetch_legacy_source = fetch_rebooted_source
+        _, _, _, _, rebooted_sources = await client._fetch_legacy_snapshot(
+            object(), {}, previous, now=now
+        )
+        assert rebooted_sources["slave"].olt_status.last_boot == reboot_time
+
+    asyncio.run(run())
+
+
 def test_ap_detail_due_respects_interval() -> None:
     client = api.RltechClient("http://example.invalid", "u", "p")
     now = datetime(2026, 8, 20, 1, 0, tzinfo=UTC)

@@ -553,13 +553,24 @@ def _stabilize_olt_status(
     status: RltechOltStatus | None, previous: RltechData | None
 ) -> RltechOltStatus | None:
     """Preserve prior OLT boot/link timestamps when only parser drift changed."""
-    if status is None or previous is None or previous.olt_status is None:
+    return _stabilize_olt_status_against(
+        status,
+        previous.olt_status if previous is not None else None,
+    )
+
+
+def _stabilize_olt_status_against(
+    status: RltechOltStatus | None,
+    previous_status: RltechOltStatus | None,
+) -> RltechOltStatus | None:
+    """Stabilize derived OLT timestamps against one source's prior status."""
+    if status is None or previous_status is None:
         return status
     return replace(
         status,
-        last_boot=_stable_datetime(status.last_boot, previous.olt_status.last_boot),
+        last_boot=_stable_datetime(status.last_boot, previous_status.last_boot),
         wan_link_up_since=_stable_datetime(
-            status.wan_link_up_since, previous.olt_status.wan_link_up_since
+            status.wan_link_up_since, previous_status.wan_link_up_since
         ),
     )
 
@@ -1600,6 +1611,13 @@ class RltechClient:
                 source_error = True
                 _LOGGER.warning("Unable to fetch RLTech legacy status from %s: %s", base_url, err)
                 continue
+            previous_source = (
+                previous.legacy_sources.get(host) if previous is not None else None
+            )
+            source_status = _stabilize_olt_status_against(
+                source_status,
+                previous_source.olt_status if previous_source is not None else None,
+            )
             if index == 0:
                 olt_status = source_status
                 lan_ports = source_lan
