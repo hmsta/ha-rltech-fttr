@@ -557,8 +557,23 @@ async def async_setup_entry(
         if new_entities:
             async_add_entities(new_entities)
         aps_with_sn = [ap for ap in coordinator.data.aps.values() if ap.sn]
+        ap_source_hosts = {
+            ap.sn: detail.source_host
+            for ap in aps_with_sn
+            if (detail := coordinator.data.ap_details.get(ap.mac)) is not None
+            and detail.source_host
+            and ap.sn
+        }
         ap_device_registry_signature = tuple(
-            sorted((ap.sn or "", ap.version, ap.ip) for ap in aps_with_sn)
+            sorted(
+                (
+                    ap.sn or "",
+                    ap.version,
+                    ap.ip,
+                    ap_source_hosts.get(ap.sn or ""),
+                )
+                for ap in aps_with_sn
+            )
         )
         if (
             aps_with_sn
@@ -572,6 +587,7 @@ async def async_setup_entry(
                     entry,
                     aps_with_sn,
                     area_sns={ap.sn for ap in new_aps if ap.sn},
+                    source_hosts=ap_source_hosts,
                 )
 
             hass.async_create_task(sync_ap_device_registry())
@@ -586,6 +602,7 @@ async def _async_sync_ap_device_registry(
     aps: list[RltechAp],
     *,
     area_sns: set[str],
+    source_hosts: dict[str, str],
 ) -> None:
     """Sync mutable AP device registry metadata."""
     area_id = entry.data.get(CONF_AP_AREA_ID)
@@ -594,6 +611,7 @@ async def _async_sync_ap_device_registry(
         identifiers={(DOMAIN, entry.entry_id)}
     )
     controller_device_id = controller.id if controller else None
+    controller_host = _entry_host(entry)
     pending = {ap.sn: ap for ap in aps if ap.sn}
     for _ in range(5):
         remaining = {}
@@ -604,10 +622,22 @@ async def _async_sync_ap_device_registry(
             if device is None:
                 remaining[sn] = ap
                 continue
+            source_host = source_hosts.get(sn)
+            parent_device_id = None
+            if source_host == controller_host:
+                parent_device_id = controller_device_id
+            elif source_host:
+                parent = device_registry.async_get_device(
+                    identifiers={
+                        (DOMAIN, f"{entry.entry_id}_legacy_olt_{source_host}")
+                    }
+                )
+                if parent is not None:
+                    parent_device_id = parent.id
             updates = ap_device_registry_updates(
                 ap,
                 device,
-                controller_device_id=controller_device_id,
+                parent_device_id=parent_device_id,
                 area_id=area_id if sn in area_sns else None,
             )
             if updates:

@@ -19,7 +19,7 @@ def ap_device_registry_updates(
     ap: RltechAp,
     device: Any,
     *,
-    controller_device_id: str | None,
+    parent_device_id: str | None,
     area_id: str | None = None,
 ) -> dict[str, Any]:
     """Return safe AP device registry updates for mutable metadata only."""
@@ -36,10 +36,10 @@ def ap_device_registry_updates(
         updates["configuration_url"] = configuration_url
 
     if (
-        controller_device_id
-        and getattr(device, "via_device_id", None) != controller_device_id
+        parent_device_id
+        and getattr(device, "via_device_id", None) != parent_device_id
     ):
-        updates["via_device_id"] = controller_device_id
+        updates["via_device_id"] = parent_device_id
 
     if area_id and getattr(device, "area_id", None) is None:
         updates["area_id"] = area_id

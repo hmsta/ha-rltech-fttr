@@ -72,7 +72,7 @@ def test_ap_device_registry_updates_mutable_metadata_only() -> None:
     updates = ap_device_registry.ap_device_registry_updates(
         ap,
         device,
-        controller_device_id="controller-1",
+        parent_device_id="controller-1",
         area_id="network",
     )
 
@@ -105,7 +105,29 @@ def test_ap_device_registry_updates_do_not_clear_missing_values() -> None:
     assert ap_device_registry.ap_device_registry_updates(
         ap,
         device,
-        controller_device_id="controller-1",
+        parent_device_id="controller-1",
+        area_id="network",
+    ) == {}
+
+
+def test_ap_device_registry_updates_preserve_parent_without_known_source() -> None:
+    ap = models.RltechAp(
+        mac="44:95:3B:B8:DC:D0",
+        ip="172.20.11.15",
+        version="V0.0.49",
+        sn="RLGM3BB8DCD0",
+    )
+    device = DummyDevice(
+        sw_version="V0.0.49",
+        configuration_url="http://172.20.11.15",
+        via_device_id="slave-olt",
+        area_id="network",
+    )
+
+    assert ap_device_registry.ap_device_registry_updates(
+        ap,
+        device,
+        parent_device_id=None,
         area_id="network",
     ) == {}
 
