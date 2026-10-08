@@ -6,6 +6,50 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 
+LIVE_AP_DETAIL_KEYS = frozenset(
+    {
+        "optical_rx_power",
+        "optical_tx_power",
+        "cpu_usage",
+        "cpu_temperature",
+        "memory_usage",
+        "flash_usage",
+        "last_boot",
+    }
+)
+
+_LAST_DOWN_CAUSE_MAP = {
+    "0": "none",
+    "1": "wire_down",
+    "2": "pon_los",
+    "3": "dying_gasp",
+    "4": "reboot",
+    "5": "deactivated",
+    "6": "manual_registration",
+    "7": "blacklisted",
+    "8": "admin_down",
+    "authfail": "authentication_failed",
+    "auth_fail": "authentication_failed",
+    "fiberbroken": "fiber_broken",
+    "fiber_broken": "fiber_broken",
+    "deactive": "deactivated",
+    "deactivated": "deactivated",
+    "dying_gasp": "dying_gasp",
+    "disabled": "disabled",
+    "reboot": "reboot",
+    "other": "other",
+}
+
+
+def normalize_last_down_cause(value: object) -> str | None:
+    """Return a stable text state for an ONU's last down cause."""
+    text = str(value).strip() if value is not None else ""
+    if not text:
+        return None
+    key = text.lower().replace("-", "_").replace(" ", "_")
+    return _LAST_DOWN_CAUSE_MAP.get(key, "unknown" if key.isdigit() else key)
+
+
 @dataclass(frozen=True)
 class RltechAp:
     """Managed AP inventory row."""

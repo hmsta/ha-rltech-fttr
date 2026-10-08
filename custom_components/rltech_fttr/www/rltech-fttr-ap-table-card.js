@@ -1260,6 +1260,20 @@ class RltechFttrApTableCard extends HTMLElement {
       6: "manual reg",
       7: "black list",
       8: "admin down",
+      none: "None",
+      wire_down: "Wire down",
+      pon_los: "PON LOS",
+      dying_gasp: "Dying gasp",
+      reboot: "Reboot",
+      deactivated: "Deactivated",
+      manual_registration: "Manual registration",
+      blacklisted: "Blacklisted",
+      admin_down: "Admin down",
+      authentication_failed: "Authentication failed",
+      fiber_broken: "Fiber broken",
+      disabled: "Disabled",
+      other: "Other",
+      unknown: "Unknown",
     };
     return map[text] || text;
   }

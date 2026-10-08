@@ -48,6 +48,7 @@ from .identifiers import (
     lan_port_sensor_object_id,
 )
 from .models import (
+    LIVE_AP_DETAIL_KEYS,
     RltechAp,
     RltechApDetail,
     RltechData,
@@ -815,6 +816,13 @@ class RltechApDetailSensor(RltechEntity, SensorEntity):
     @property
     def native_value(self) -> int | float | str | datetime | None:
         detail = self._detail
+        ap = self._ap
+        if (
+            self.entity_description.key in LIVE_AP_DETAIL_KEYS
+            and ap is not None
+            and ap.online is False
+        ):
+            return None
         return self.entity_description.value_fn(detail) if detail else None
 
     @property

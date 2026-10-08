@@ -4,13 +4,15 @@ from __future__ import annotations
 
 from typing import Any
 
-from .models import RltechAp, RltechApDetail, RltechData
+from .models import LIVE_AP_DETAIL_KEYS, RltechAp, RltechApDetail, RltechData
 
 
-def _detail_fields(detail: RltechApDetail | None) -> dict[str, Any]:
+def _detail_fields(
+    detail: RltechApDetail | None, *, online: bool | None
+) -> dict[str, Any]:
     if detail is None:
         return {}
-    return {
+    fields = {
         "detail_last_update": detail.last_update.isoformat() if detail.last_update else None,
         "optical_rx_power": detail.optical_rx_power,
         "optical_tx_power": detail.optical_tx_power,
@@ -25,6 +27,10 @@ def _detail_fields(detail: RltechApDetail | None) -> dict[str, Any]:
         "interface": detail.interface,
         "source_host": detail.source_host,
     }
+    if online is False:
+        for key in LIVE_AP_DETAIL_KEYS:
+            fields[key] = None
+    return fields
 
 
 def ap_to_row(
@@ -56,7 +62,7 @@ def ap_to_row(
         "dev_sn": ap.dev_sn,
         "upgrade_flag": ap.upgrade_flag,
         "entities": registry_info.get("entities") or {},
-        **_detail_fields(detail),
+        **_detail_fields(detail, online=ap.online),
     }
 
 

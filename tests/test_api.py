@@ -165,7 +165,7 @@ def test_parse_ap_online_detail_embedded_json() -> None:
     assert detail.optical_rx_power == -15.34
     assert detail.downstream_optical_rx_power == -19.86
     assert detail.active is True
-    assert detail.last_down_cause == "FiberBroken"
+    assert detail.last_down_cause == "fiber_broken"
     assert detail.last_up_time == "2026-08-19 17:43:11"
     assert detail.last_down_time == "2026-08-19 17:42:35"
     assert detail.last_dying_gasp_time == "2026-08-17 15:26:17"
@@ -1239,8 +1239,40 @@ def test_parse_legacy_port80_pages() -> None:
     assert onu_rows["RLGM3BB8DCE0"].reg_off_time == datetime(
         2026, 8, 21, 6, 12, 26, tzinfo=UTC
     )
-    assert onu_rows["RLGM3BB8DCE0"].last_down_cause == "0"
+    assert onu_rows["RLGM3BB8DCE0"].last_down_cause == "none"
     assert onu_rows["RLGM3BB8DCE0"].source_host == "172.20.11.1"
+
+
+def test_last_down_cause_is_normalized_for_automations() -> None:
+    assert models.normalize_last_down_cause("2") == "pon_los"
+    assert models.normalize_last_down_cause("3") == "dying_gasp"
+    assert models.normalize_last_down_cause("FiberBroken") == "fiber_broken"
+    assert models.normalize_last_down_cause("Dying-gasp") == "dying_gasp"
+    assert models.normalize_last_down_cause("99") == "unknown"
+
+
+def test_offline_ap_row_hides_live_detail_values() -> None:
+    ap = models.RltechAp(mac="44:95:3B:B8:DC:E0", online=False)
+    detail = models.RltechApDetail(
+        optical_rx_power=-15.46,
+        optical_tx_power=-1.79,
+        cpu_usage=3,
+        cpu_temperature=65,
+        memory_usage=30,
+        flash_usage=86,
+        last_boot=datetime(2026, 8, 20, tzinfo=UTC),
+        reg_off_time=datetime(2026, 8, 21, tzinfo=UTC),
+        last_down_cause="dying_gasp",
+        source_host="172.20.11.1",
+    )
+
+    row = ap_inventory.ap_to_row(ap, detail=detail)
+
+    for key in models.LIVE_AP_DETAIL_KEYS:
+        assert row[key] is None
+    assert row["reg_off_time"] == "2026-08-21T00:00:00+00:00"
+    assert row["last_down_cause"] == "dying_gasp"
+    assert row["source_host"] == "172.20.11.1"
 
 
 def test_legacy_onu_details_join_to_aps_by_serial() -> None:

@@ -30,6 +30,7 @@ from .models import (
     RltechLanPort,
     RltechOltStatus,
     RltechStation,
+    normalize_last_down_cause,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -302,7 +303,9 @@ def parse_ap_detail(text: str) -> RltechApDetail:
         last_up_time=_text(pon_data.get("last_up_time")),
         last_down_time=_text(pon_data.get("last_down_time")),
         last_dying_gasp_time=_text(pon_data.get("last_dying_gasptime")),
-        last_down_cause=_text(pon_data.get("last_down_cause")),
+        last_down_cause=normalize_last_down_cause(
+            _text(pon_data.get("last_down_cause"))
+        ),
         identify_vendor=_text(pon_data.get("identify_vendor")),
         equipment_id=_text(pon_data.get("equipment_id")),
         sn_address=_text(pon_data.get("sn_address")),
@@ -866,7 +869,7 @@ def parse_legacy_onu_mgmt(
                 row[2],
                 local_timezone=local_timezone,
             ),
-            last_down_cause=_none_if_na(row[7]),
+            last_down_cause=normalize_last_down_cause(_none_if_na(row[7])),
             source_host=source_host,
         )
     return rows
