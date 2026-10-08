@@ -1690,8 +1690,11 @@ class RltechClient:
                         if include_station_inventory
                         else []
                     )
-                except AuthenticationError:
-                    raise
+                except AuthenticationError as exc:
+                    _LOGGER.warning(
+                        "Unable to authenticate to RLTech 8080 inventory: %s", exc
+                    )
+                    primary_error = exc
                 except Exception as exc:  # noqa: BLE001 - port 80 can still refresh
                     _LOGGER.warning("Unable to fetch RLTech 8080 inventory: %s", exc)
                     primary_error = exc
@@ -1723,8 +1726,23 @@ class RltechClient:
                         local_timezone=local_timezone,
                     )
                 )
-            legacy_success = any(
+            any_legacy_success = any(
                 source.last_success == now for source in legacy_sources.values()
+            )
+            primary_legacy_host = None
+            if self.legacy_base_urls:
+                primary_legacy_url = self.legacy_base_urls[0]
+                primary_legacy_host = (
+                    urlsplit(primary_legacy_url).hostname or primary_legacy_url
+                )
+            primary_legacy_source = (
+                legacy_sources.get(primary_legacy_host)
+                if primary_legacy_host is not None
+                else None
+            )
+            primary_legacy_success = bool(
+                primary_legacy_source
+                and primary_legacy_source.last_success == now
             )
 
             if primary_error is None:
@@ -1749,17 +1767,17 @@ class RltechClient:
                     )
                 if not include_station_inventory and previous is not None:
                     data = replace(data, stations=previous.stations)
-            elif previous is not None and legacy_success:
+            elif previous is not None and any_legacy_success:
                 data = replace(
                     previous,
                     poll_duration_ms=int((time.monotonic() - started) * 1000),
                 )
-            elif include_hardware_status and (olt_status is not None or legacy_sources):
+            elif include_hardware_status and any_legacy_success:
                 data = RltechData(
                     aps={},
                     ap_details=ap_details,
                     stations={},
-                    last_success_80=now if legacy_success else None,
+                    last_success_80=now if primary_legacy_success else None,
                     poll_duration_ms=int((time.monotonic() - started) * 1000),
                 )
             else:
@@ -1775,6 +1793,12 @@ class RltechClient:
                 lan_ports=lan_ports or data.lan_ports,
                 lanpon_ports=lanpon_ports or data.lanpon_ports,
                 legacy_sources=legacy_sources or data.legacy_sources,
-                last_success_80=now if legacy_success else data.last_success_80,
+                last_success_80=(
+                    now
+                    if primary_legacy_success
+                    else previous.last_success_80
+                    if previous is not None
+                    else data.last_success_80
+                ),
                 ap_details=ap_details or data.ap_details,
             )

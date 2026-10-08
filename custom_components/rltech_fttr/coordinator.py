@@ -59,6 +59,7 @@ from .const import (
 from .hostname_enrichment import enrich_from_home_assistant_dhcp
 from .models import RltechData
 from .mqtt import (
+    clear_offline_ap_live_details,
     MqttApHealthUpdate,
     MqttApStatusUpdate,
     MqttStationUpdate,
@@ -96,6 +97,7 @@ class RltechCoordinator(DataUpdateCoordinator[RltechData]):
             enabled=entry.data.get(CONF_ENABLE_MQTT, DEFAULT_ENABLE_MQTT)
         )
         self._last_mqtt_hostname_enrichment: datetime | None = None
+        self._mqtt_ap_field_updates: dict[str, dict[str, datetime]] = {}
         super().__init__(
             hass,
             _LOGGER,
@@ -153,10 +155,17 @@ class RltechCoordinator(DataUpdateCoordinator[RltechData]):
             _LOGGER.debug("Unable to enrich station hostnames from DHCP cache: %s", err)
         data = enrich_station_vendors(data)
         current = self._last_data
-        if current is not None and current is not previous:
-            data = preserve_live_overlay(current, data, previous)
+        live_ap_fields = self._fresh_mqtt_ap_fields(now)
+        if current is not None and (current is not previous or live_ap_fields):
+            data = preserve_live_overlay(
+                current,
+                data,
+                previous,
+                live_ap_fields=live_ap_fields,
+            )
             data = enrich_station_vendors(data)
         data = self._age_stations(data, now)
+        data = clear_offline_ap_live_details(data)
         self._last_data = data
         return data
 
@@ -230,10 +239,15 @@ class RltechCoordinator(DataUpdateCoordinator[RltechData]):
             data = self._age_stations(data, now)
         elif cmd == "XReport_ExtendInfo" and isinstance(update, MqttApHealthUpdate):
             data = merge_ap_health_update(data, update, now=now)
+            if update.mac in data.aps and update.assoc_count is not None:
+                self._record_mqtt_ap_field(update.mac, "assoc_count", now)
         elif cmd in {"APOnline", "APOffline"} and isinstance(
             update, MqttApStatusUpdate
         ):
             data = merge_ap_status_update(data, update)
+            mac = self._mqtt_status_ap_mac(update, data)
+            if mac is not None:
+                self._record_mqtt_ap_field(mac, "online", now)
         else:
             return
         if data is self._last_data:
@@ -245,6 +259,54 @@ class RltechCoordinator(DataUpdateCoordinator[RltechData]):
                 f"{SIGNAL_STATIONS_CHANGED}_{self.config_entry.entry_id}",
                 now,
             )
+
+    def _record_mqtt_ap_field(self, mac: str, field: str, now: datetime) -> None:
+        """Remember when MQTT last supplied one authoritative AP field."""
+        self._mqtt_ap_field_updates.setdefault(mac, {})[field] = now
+
+    def _fresh_mqtt_ap_fields(self, now: datetime) -> dict[str, set[str]]:
+        """Return MQTT AP fields recent enough to outrank an HTTP snapshot."""
+        max_age = timedelta(
+            seconds=max(
+                180,
+                self.config_entry.data.get(
+                    CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
+                )
+                * 2,
+            )
+        )
+        fresh: dict[str, set[str]] = {}
+        for mac, fields in list(self._mqtt_ap_field_updates.items()):
+            active = {field for field, seen in fields.items() if now - seen <= max_age}
+            if active:
+                fresh[mac] = active
+                self._mqtt_ap_field_updates[mac] = {
+                    field: seen for field, seen in fields.items() if field in active
+                }
+            else:
+                self._mqtt_ap_field_updates.pop(mac, None)
+        return fresh
+
+    @staticmethod
+    def _mqtt_status_ap_mac(
+        update: MqttApStatusUpdate, data: RltechData
+    ) -> str | None:
+        """Resolve an MQTT status notification to a known AP MAC."""
+        if update.mac in data.aps:
+            return update.mac
+        if update.sn is None:
+            return None
+        normalized_sn = update.sn.replace(":", "").replace("-", "").upper()
+        return next(
+            (
+                mac
+                for mac, ap in data.aps.items()
+                if ap.sn
+                and ap.sn.replace(":", "").replace("-", "").upper()
+                == normalized_sn
+            ),
+            None,
+        )
 
     def _async_set_live_overlay_data(self, data: RltechData) -> None:
         """Publish MQTT overlay data without delaying the next HTTP poll."""

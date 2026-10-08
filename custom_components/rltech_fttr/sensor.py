@@ -469,11 +469,17 @@ async def async_setup_entry(
     known_legacy_lan_ports: set[tuple[str, int]] = set()
     known_legacy_lanpon_ports: set[tuple[str, int]] = set()
     last_ap_device_registry_signature: tuple[
-        tuple[str, str | None, str | None], ...
+        tuple[str, str | None, str | None, str | None], ...
     ] = ()
+    ap_device_registry_task: asyncio.Task[None] | None = None
+    pending_ap_area_sns: set[str] = set()
+    pending_ap_registry_sns: set[str] = set()
+    ap_registry_retry_after = 0.0
 
     @callback
     def add_dynamic_entities() -> None:
+        nonlocal ap_device_registry_task
+        nonlocal ap_registry_retry_after
         nonlocal last_ap_device_registry_signature
         if coordinator.data is None:
             return
@@ -513,8 +519,7 @@ async def async_setup_entry(
                     RltechLanPonPortSensor(entry, coordinator, ponid, description)
                     for description in LANPON_PORT_SENSORS
                 )
-            legacy_hosts = list(coordinator.data.legacy_sources)
-            master_host = legacy_hosts[0] if legacy_hosts else None
+            master_host = _entry_host(entry)
             for host, source in coordinator.data.legacy_sources.items():
                 if host == master_host:
                     continue
@@ -556,6 +561,7 @@ async def async_setup_entry(
                     )
         if new_entities:
             async_add_entities(new_entities)
+        pending_ap_area_sns.update(ap.sn for ap in new_aps if ap.sn)
         aps_with_sn = [ap for ap in coordinator.data.aps.values() if ap.sn]
         ap_source_hosts = {
             ap.sn: detail.source_host
@@ -575,24 +581,61 @@ async def async_setup_entry(
                 for ap in aps_with_sn
             )
         )
-        if (
-            aps_with_sn
-            and ap_device_registry_signature != last_ap_device_registry_signature
+        signature_changed = (
+            ap_device_registry_signature != last_ap_device_registry_signature
+        )
+        task_running = (
+            ap_device_registry_task is not None
+            and not ap_device_registry_task.done()
+        )
+        loop_time = asyncio.get_running_loop().time()
+        retry_due = loop_time >= ap_registry_retry_after
+        if aps_with_sn and (
+            signature_changed
+            or (
+                (pending_ap_area_sns or pending_ap_registry_sns)
+                and not task_running
+                and retry_due
+            )
         ):
             last_ap_device_registry_signature = ap_device_registry_signature
+            ap_registry_retry_after = loop_time + 30
+
+            if signature_changed and task_running:
+                ap_device_registry_task.cancel()
+            area_sns = set(pending_ap_area_sns)
+            attempted_sns = {ap.sn for ap in aps_with_sn if ap.sn}
+            known_olt_hosts = set(coordinator.data.legacy_sources)
+            known_olt_hosts.add(_entry_host(entry))
 
             async def sync_ap_device_registry() -> None:
-                await _async_sync_ap_device_registry(
+                unresolved = await _async_sync_ap_device_registry(
                     hass,
                     entry,
                     aps_with_sn,
-                    area_sns={ap.sn for ap in new_aps if ap.sn},
+                    area_sns=area_sns,
+                    known_olt_hosts=known_olt_hosts,
                     source_hosts=ap_source_hosts,
                 )
+                pending_ap_area_sns.difference_update(area_sns - unresolved)
+                pending_ap_registry_sns.difference_update(attempted_sns)
+                pending_ap_registry_sns.update(unresolved)
 
-            hass.async_create_task(sync_ap_device_registry())
+            ap_device_registry_task = hass.async_create_task(
+                sync_ap_device_registry()
+            )
+
+    @callback
+    def cancel_ap_device_registry_sync() -> None:
+        """Cancel a pending registry retry task during entry unload."""
+        if (
+            ap_device_registry_task is not None
+            and not ap_device_registry_task.done()
+        ):
+            ap_device_registry_task.cancel()
 
     add_dynamic_entities()
+    entry.async_on_unload(cancel_ap_device_registry_sync)
     entry.async_on_unload(coordinator.async_add_listener(add_dynamic_entities))
 
 
@@ -602,8 +645,9 @@ async def _async_sync_ap_device_registry(
     aps: list[RltechAp],
     *,
     area_sns: set[str],
+    known_olt_hosts: set[str],
     source_hosts: dict[str, str],
-) -> None:
+) -> set[str]:
     """Sync mutable AP device registry metadata."""
     area_id = entry.data.get(CONF_AP_AREA_ID)
     device_registry = dr.async_get(hass)
@@ -624,9 +668,11 @@ async def _async_sync_ap_device_registry(
                 continue
             source_host = source_hosts.get(sn)
             parent_device_id = None
+            parent_pending = False
             if source_host == controller_host:
                 parent_device_id = controller_device_id
-            elif source_host:
+                parent_pending = controller_device_id is None
+            elif source_host in known_olt_hosts:
                 parent = device_registry.async_get_device(
                     identifiers={
                         (DOMAIN, f"{entry.entry_id}_legacy_olt_{source_host}")
@@ -634,6 +680,8 @@ async def _async_sync_ap_device_registry(
                 )
                 if parent is not None:
                     parent_device_id = parent.id
+                else:
+                    parent_pending = True
             updates = ap_device_registry_updates(
                 ap,
                 device,
@@ -642,11 +690,14 @@ async def _async_sync_ap_device_registry(
             )
             if updates:
                 device_registry.async_update_device(device.id, **updates)
+            if parent_pending:
+                remaining[sn] = ap
 
         if not remaining:
-            return
+            return set()
         pending = remaining
         await asyncio.sleep(0.2)
+    return set(pending)
 
 
 class RltechControllerSensor(RltechEntity, SensorEntity):

@@ -156,12 +156,13 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload an RLTech FTTR config entry."""
     coordinator: RltechCoordinator = hass.data[DOMAIN][entry.entry_id]
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    if not unload_ok:
+        return False
     with contextlib.suppress(Exception):
         await coordinator.async_stop_mqtt()
     with contextlib.suppress(Exception):
         await coordinator.async_stop_station_aging()
     with contextlib.suppress(Exception):
         await coordinator.client.logout(async_get_clientsession(hass))
-    if unload_ok:
-        hass.data[DOMAIN].pop(entry.entry_id)
-    return unload_ok
+    hass.data[DOMAIN].pop(entry.entry_id)
+    return True

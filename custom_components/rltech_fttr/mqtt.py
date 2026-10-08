@@ -14,7 +14,13 @@ import ssl
 import struct
 from typing import Any
 
-from .models import RltechAp, RltechApDetail, RltechData, RltechStation
+from .models import (
+    LIVE_AP_DETAIL_KEYS,
+    RltechAp,
+    RltechApDetail,
+    RltechData,
+    RltechStation,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -387,37 +393,90 @@ def merge_ap_status_update(
         return data
 
     ap = data.aps[mac]
-    if ap.online is update.online:
-        return data
     aps = dict(data.aps)
     aps[mac] = replace(ap, online=update.online)
-    return replace(data, aps=aps)
+    merged = replace(data, aps=aps)
+    if update.online is False:
+        merged = clear_offline_ap_live_details(merged)
+    if aps[mac] == ap and merged.ap_details is data.ap_details:
+        return data
+    return merged
+
+
+def clear_offline_ap_live_details(data: RltechData) -> RltechData:
+    """Clear live-only AP diagnostics for every AP currently offline."""
+    details = data.ap_details
+    for mac, ap in data.aps.items():
+        detail = details.get(mac)
+        if ap.online is not False or detail is None:
+            continue
+        if not any(getattr(detail, key) is not None for key in LIVE_AP_DETAIL_KEYS):
+            continue
+        if details is data.ap_details:
+            details = dict(details)
+        details[mac] = replace(
+            detail,
+            **{key: None for key in LIVE_AP_DETAIL_KEYS},
+        )
+    if details is data.ap_details:
+        return data
+    return replace(data, ap_details=details)
 
 
 def preserve_live_overlay(
-    current: RltechData, fresh: RltechData, previous: RltechData | None = None
+    current: RltechData,
+    fresh: RltechData,
+    previous: RltechData | None = None,
+    *,
+    live_ap_fields: dict[str, set[str]] | None = None,
 ) -> RltechData:
     """Keep MQTT-fed live fields when an HTTP poll returns an older snapshot."""
-    aps = _preserve_live_ap_fields(current, fresh, previous)
+    aps = _preserve_live_ap_fields(
+        current,
+        fresh,
+        previous,
+        live_ap_fields=live_ap_fields or {},
+    )
     stations = _preserve_live_station_fields(current, fresh, previous)
     ap_details = _preserve_live_ap_detail_fields(current, fresh)
     return replace(fresh, aps=aps, stations=stations, ap_details=ap_details)
 
 
 def _preserve_live_ap_fields(
-    current: RltechData, fresh: RltechData, previous: RltechData | None
+    current: RltechData,
+    fresh: RltechData,
+    previous: RltechData | None,
+    *,
+    live_ap_fields: dict[str, set[str]],
 ) -> dict[str, RltechAp]:
     """Return AP rows with MQTT-fresher values kept for known APs."""
     aps = dict(fresh.aps)
     for mac, current_ap in current.aps.items():
         if mac not in aps:
             continue
-        if previous is not None and current_ap == previous.aps.get(mac):
+        previous_ap = previous.aps.get(mac) if previous is not None else None
+        authoritative_fields = live_ap_fields.get(mac, set())
+        assoc_changed_during_poll = (
+            previous_ap is None
+            or current_ap.assoc_count != previous_ap.assoc_count
+        )
+        online_changed_during_poll = (
+            previous_ap is None or current_ap.online != previous_ap.online
+        )
+        if (
+            not assoc_changed_during_poll
+            and not online_changed_during_poll
+            and not authoritative_fields
+        ):
             continue
         updates: dict[str, Any] = {}
-        if current_ap.assoc_count is not None:
+        if current_ap.assoc_count is not None and (
+            assoc_changed_during_poll or "assoc_count" in authoritative_fields
+        ):
             updates["assoc_count"] = current_ap.assoc_count
-        if current_ap.online is not None:
+        if current_ap.online is not None and (
+            online_changed_during_poll or "online" in authoritative_fields
+        ):
             updates["online"] = current_ap.online
         if updates:
             aps[mac] = replace(aps[mac], **updates)
@@ -693,14 +752,23 @@ class RltechMqttManager:
     async def stop(self) -> None:
         """Stop the background MQTT loop."""
         self._stopped.set()
-        if self._client is not None:
-            await self._client.disconnect()
-        if self._task is not None:
-            self._task.cancel()
-            try:
-                await self._task
-            except asyncio.CancelledError:
-                pass
+        client = self._client
+        task = self._task
+        try:
+            if client is not None:
+                await asyncio.wait_for(client.disconnect(), timeout=5)
+        except Exception as err:  # noqa: BLE001 - shutdown must still cancel task
+            _LOGGER.debug("RLTech MQTT disconnect during shutdown failed: %s", err)
+        finally:
+            if task is not None:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+            self._task = None
+            self._client = None
+            self.stats.connected = False
 
     async def _run(self) -> None:
         backoff = 5

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 
 from homeassistant.components.button import ButtonDeviceClass, ButtonEntity
 from homeassistant.config_entries import ConfigEntry
@@ -20,6 +22,7 @@ from .identifiers import ap_sensor_object_id, ap_sensor_unique_id
 from .models import RltechAp
 
 _LOGGER = logging.getLogger(__name__)
+REBOOT_COOLDOWN_SECONDS = 60
 
 
 async def async_setup_entry(
@@ -71,6 +74,8 @@ class RltechApRebootButton(RltechEntity, ButtonEntity):
         if object_id is None:
             raise ValueError(f"AP {mac} has no SN")
         self.entity_id = f"button.{object_id}"
+        self._reboot_lock = asyncio.Lock()
+        self._last_reboot_request: float | None = None
 
     @property
     def available(self) -> bool:
@@ -84,17 +89,27 @@ class RltechApRebootButton(RltechEntity, ButtonEntity):
 
     async def async_press(self) -> None:
         """Reboot the AP."""
+        if self._reboot_lock.locked():
+            raise HomeAssistantError("AP reboot is already in progress")
+        if (
+            self._last_reboot_request is not None
+            and time.monotonic() - self._last_reboot_request
+            < REBOOT_COOLDOWN_SECONDS
+        ):
+            raise HomeAssistantError("AP reboot was already requested recently")
         ap = self._ap
         if ap is None or not ap.ip:
             raise HomeAssistantError("AP has no IP address for reboot")
         session = async_get_clientsession(self.coordinator.hass)
-        try:
-            await self.coordinator.client.reboot_ap(session, ap)
-        except RltechError as err:
-            raise HomeAssistantError(f"Unable to reboot RLTech AP: {err}") from err
-        except Exception as err:
-            _LOGGER.exception("Unexpected RLTech AP reboot failure")
-            raise HomeAssistantError(f"Unable to reboot RLTech AP: {err}") from err
+        async with self._reboot_lock:
+            try:
+                await self.coordinator.client.reboot_ap(session, ap)
+            except RltechError as err:
+                raise HomeAssistantError(f"Unable to reboot RLTech AP: {err}") from err
+            except Exception as err:
+                _LOGGER.exception("Unexpected RLTech AP reboot failure")
+                raise HomeAssistantError(f"Unable to reboot RLTech AP: {err}") from err
+            self._last_reboot_request = time.monotonic()
 
     @property
     def _ap(self) -> RltechAp | None:

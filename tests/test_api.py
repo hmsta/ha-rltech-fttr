@@ -714,6 +714,41 @@ def test_mqtt_ap_lifecycle_can_match_by_sn() -> None:
     assert merged.aps[mac].online is True
 
 
+def test_mqtt_ap_offline_clears_live_diagnostics_but_keeps_history() -> None:
+    mac = "44:95:3B:B8:DC:D0"
+    data = models.RltechData(
+        aps={mac: models.RltechAp(mac=mac, sn="RLGM3BB8DCD0", online=True)},
+        ap_details={
+            mac: models.RltechApDetail(
+                mac=mac,
+                optical_rx_power=-15.4,
+                optical_tx_power=-1.8,
+                cpu_usage=8,
+                cpu_temperature=65,
+                memory_usage=30,
+                flash_usage=86,
+                last_boot=datetime(2026, 8, 21, 10, 0, tzinfo=UTC),
+                last_down_cause="dying_gasp",
+                reg_off_time=datetime(2026, 8, 21, 11, 0, tzinfo=UTC),
+                source_host="172.20.11.2",
+            )
+        },
+    )
+
+    merged = mqtt.merge_ap_status_update(
+        data,
+        mqtt.MqttApStatusUpdate(online=False, mac=mac, sn=None),
+    )
+    detail = merged.ap_details[mac]
+
+    assert merged.aps[mac].online is False
+    for key in models.LIVE_AP_DETAIL_KEYS:
+        assert getattr(detail, key) is None
+    assert detail.last_down_cause == "dying_gasp"
+    assert detail.reg_off_time == datetime(2026, 8, 21, 11, 0, tzinfo=UTC)
+    assert detail.source_host == "172.20.11.2"
+
+
 def test_mqtt_live_overlay_preserves_newer_station_update() -> None:
     fresh_time = datetime(2026, 8, 21, 12, 0, tzinfo=UTC)
     current_time = fresh_time + timedelta(seconds=10)
@@ -931,6 +966,97 @@ def test_mqtt_live_overlay_preserves_ap_online_changed_during_poll() -> None:
     assert changed_merged.aps[mac].online is False
 
 
+def test_mqtt_live_overlay_preserves_recent_fields_updated_before_poll() -> None:
+    mac = "44:95:3B:B8:DC:D0"
+    current = models.RltechData(
+        aps={
+            mac: models.RltechAp(
+                mac=mac,
+                sn="RLGM3BB8DCD0",
+                online=False,
+                assoc_count=7,
+            )
+        }
+    )
+    fresh = models.RltechData(
+        aps={
+            mac: models.RltechAp(
+                mac=mac,
+                sn="RLGM3BB8DCD0",
+                online=True,
+                assoc_count=2,
+            )
+        }
+    )
+
+    merged = mqtt.preserve_live_overlay(
+        current,
+        fresh,
+        current,
+        live_ap_fields={mac: {"online", "assoc_count"}},
+    )
+
+    assert merged.aps[mac].online is False
+    assert merged.aps[mac].assoc_count == 7
+
+
+def test_mqtt_live_overlay_does_not_preserve_unrelated_ap_field() -> None:
+    mac = "44:95:3B:B8:DC:D0"
+    previous = models.RltechData(
+        aps={
+            mac: models.RltechAp(
+                mac=mac,
+                online=True,
+                assoc_count=2,
+            )
+        }
+    )
+    current = models.RltechData(
+        aps={
+            mac: models.RltechAp(
+                mac=mac,
+                online=True,
+                assoc_count=7,
+            )
+        }
+    )
+    fresh = models.RltechData(
+        aps={
+            mac: models.RltechAp(
+                mac=mac,
+                online=False,
+                assoc_count=1,
+            )
+        }
+    )
+
+    merged = mqtt.preserve_live_overlay(current, fresh, previous)
+
+    assert merged.aps[mac].assoc_count == 7
+    assert merged.aps[mac].online is False
+
+
+def test_offline_ap_live_diagnostics_stay_cleared_after_http_merge() -> None:
+    mac = "44:95:3B:B8:DC:D0"
+    data = models.RltechData(
+        aps={mac: models.RltechAp(mac=mac, online=False)},
+        ap_details={
+            mac: models.RltechApDetail(
+                mac=mac,
+                optical_rx_power=-15.4,
+                cpu_usage=8,
+                last_down_cause="pon_los",
+            )
+        },
+    )
+
+    normalized = mqtt.clear_offline_ap_live_details(data)
+
+    assert normalized.ap_details[mac].optical_rx_power is None
+    assert normalized.ap_details[mac].cpu_usage is None
+    assert normalized.ap_details[mac].last_down_cause == "pon_los"
+
+
 def test_mqtt_packet_reader_handles_publish_ping_and_disconnect() -> None:
     async def run() -> None:
         client = mqtt.AsyncPskMqttClient(
@@ -957,6 +1083,39 @@ def test_mqtt_packet_reader_handles_publish_ping_and_disconnect() -> None:
         except mqtt.RltechMqttError:
             return
         raise AssertionError("expected broker disconnected error")
+
+    asyncio.run(run())
+
+
+def test_mqtt_stop_cancels_task_when_disconnect_fails() -> None:
+    async def run() -> None:
+        stats = mqtt.RltechMqttStats(enabled=True, connected=True)
+        manager = mqtt.RltechMqttManager(
+            host="olt",
+            port=8883,
+            username="admin",
+            password="password",
+            psk_identity="admin",
+            psk_hex="61646D696E21402324",
+            client_id="test",
+            apply_update=lambda *_args: None,
+            stats=stats,
+        )
+
+        class FailedDisconnectClient:
+            async def disconnect(self):
+                raise OSError("socket close failed")
+
+        task = asyncio.create_task(asyncio.sleep(60))
+        manager._client = FailedDisconnectClient()
+        manager._task = task
+
+        await manager.stop()
+
+        assert task.cancelled()
+        assert manager._task is None
+        assert manager._client is None
+        assert stats.connected is False
 
     asyncio.run(run())
 
@@ -1982,7 +2141,236 @@ def test_fetch_snapshot_uses_legacy_status_when_8080_is_busy() -> None:
     asyncio.run(run())
 
 
-def test_fetch_snapshot_raises_when_8080_and_legacy_both_fail() -> None:
+def test_fetch_snapshot_uses_legacy_status_when_8080_authentication_fails() -> None:
+    async def run() -> None:
+        previous_time = datetime(2026, 8, 30, 11, 1, tzinfo=UTC)
+        previous = models.RltechData(
+            aps={
+                "44:95:3B:B8:DC:E0": models.RltechAp(
+                    mac="44:95:3B:B8:DC:E0",
+                    sn="RLGM3BB8DCE0",
+                )
+            },
+            last_success_8080=previous_time,
+            last_success_80=previous_time,
+        )
+        client = api.RltechClient(
+            "http://olt:8080",
+            "bad-user",
+            "bad-password",
+            legacy_base_urls=["http://olt"],
+        )
+
+        async def failed_login(_session):
+            raise api.AuthenticationError("invalid credentials")
+
+        async def harmless_logout(_session):
+            return None
+
+        async def fetch_legacy(_session, _aps, _previous, *, now, **_kwargs):
+            source = models.RltechLegacyOltSource(
+                host="olt",
+                base_url="http://olt",
+                olt_status=models.RltechOltStatus(cpu_usage=9),
+                last_success=now,
+            )
+            return source.olt_status, {}, {}, {}, {"olt": source}
+
+        client.login = failed_login
+        client.logout = harmless_logout
+        client._fetch_legacy_snapshot = fetch_legacy
+
+        data = await client.fetch_snapshot(object(), previous=previous)
+
+        assert data.aps == previous.aps
+        assert data.last_success_8080 == previous_time
+        assert data.last_success_80 > previous_time
+        assert data.olt_status.cpu_usage == 9
+
+    asyncio.run(run())
+
+
+def test_fetch_snapshot_does_not_replace_inventory_with_stale_legacy_cache() -> None:
+    async def run() -> None:
+        previous_time = datetime(2026, 8, 30, 11, 1, tzinfo=UTC)
+        cached_source = models.RltechLegacyOltSource(
+            host="olt",
+            base_url="http://olt",
+            olt_status=models.RltechOltStatus(cpu_usage=9),
+            last_success=previous_time,
+        )
+        previous = models.RltechData(
+            aps={
+                "44:95:3B:B8:DC:E0": models.RltechAp(
+                    mac="44:95:3B:B8:DC:E0",
+                    sn="RLGM3BB8DCE0",
+                )
+            },
+            stations={
+                "7C:45:D0:4C:18:40": models.RltechStation(
+                    mac="7C:45:D0:4C:18:40",
+                    reported_online=True,
+                    home=True,
+                    last_seen=previous_time,
+                )
+            },
+            olt_status=cached_source.olt_status,
+            legacy_sources={"olt": cached_source},
+            last_success_8080=previous_time,
+            last_success_80=previous_time,
+        )
+        client = api.RltechClient(
+            "http://olt:8080",
+            "bad-user",
+            "bad-password",
+            legacy_base_urls=["http://olt"],
+        )
+
+        async def failed_login(_session):
+            raise api.AuthenticationError("invalid credentials")
+
+        async def harmless_logout(_session):
+            return None
+
+        async def stale_legacy(_session, _aps, _previous, **_kwargs):
+            return (
+                cached_source.olt_status,
+                {},
+                {},
+                {},
+                {"olt": cached_source},
+            )
+
+        client.login = failed_login
+        client.logout = harmless_logout
+        client._fetch_legacy_snapshot = stale_legacy
+
+        try:
+            await client.fetch_snapshot(object(), previous=previous)
+        except api.AuthenticationError:
+            return
+        raise AssertionError("expected 8080 authentication failure")
+
+    asyncio.run(run())
+
+
+def test_last_success_80_tracks_configured_olt_not_slave_success() -> None:
+    async def run() -> None:
+        previous_time = datetime(2026, 8, 30, 11, 1, tzinfo=UTC)
+        previous = models.RltechData(last_success_80=previous_time)
+        client = api.RltechClient(
+            "http://olt:8080",
+            "u",
+            "p",
+            legacy_base_urls=["http://olt", "http://slave"],
+        )
+
+        async def fetch_legacy(_session, _aps, _previous, *, now, **_kwargs):
+            master = models.RltechLegacyOltSource(
+                host="olt",
+                base_url="http://olt",
+                last_success=previous_time,
+            )
+            slave = models.RltechLegacyOltSource(
+                host="slave",
+                base_url="http://slave",
+                last_success=now,
+            )
+            return None, {}, {}, {}, {"olt": master, "slave": slave}
+
+        client._fetch_legacy_snapshot = fetch_legacy
+        data = await client.fetch_snapshot(
+            object(),
+            previous=previous,
+            include_ap_inventory=False,
+            include_station_inventory=False,
+        )
+
+        assert data.last_success_80 == previous_time
+        assert data.legacy_sources["slave"].last_success > previous_time
+
+    asyncio.run(run())
+
+
+def test_fetch_snapshot_keeps_legacy_details_when_only_port80_fails() -> None:
+    async def run() -> None:
+        previous_time = datetime(2026, 8, 30, 11, 1, tzinfo=UTC)
+        mac = "44:95:3B:B8:DC:E0"
+        previous_detail = models.RltechApDetail(
+            mac=mac,
+            optical_rx_power=-15.4,
+            optical_tx_power=-1.8,
+            source_host="olt",
+        )
+        previous_source = models.RltechLegacyOltSource(
+            host="olt",
+            base_url="http://olt",
+            olt_status=models.RltechOltStatus(cpu_usage=9),
+            last_success=previous_time,
+        )
+        previous = models.RltechData(
+            aps={mac: models.RltechAp(mac=mac, sn="RLGM3BB8DCE0")},
+            ap_details={mac: previous_detail},
+            legacy_sources={"olt": previous_source},
+            last_success_80=previous_time,
+        )
+        client = api.RltechClient(
+            "http://olt:8080",
+            "u",
+            "p",
+            legacy_base_urls=["http://olt"],
+        )
+        session = FakeSession(
+            [
+                FakeResponse(
+                    200,
+                    json.dumps(
+                        {
+                            "Logged": "0",
+                            "Privilege": "1",
+                            "Active": "1",
+                            "ecntToken": "tok",
+                        }
+                    ),
+                ),
+                FakeResponse(
+                    200,
+                    html_payload(
+                        "AP_manage",
+                        payload(
+                            [
+                                {
+                                    "Mac": "44953BB8DCE0",
+                                    "SN": "RLGM3BB8DCE0",
+                                    "Alias": "Updated alias",
+                                    "Status": "1",
+                                }
+                            ]
+                        ),
+                    ),
+                ),
+                FakeResponse(200, html_payload("STA_manage", payload([]))),
+                FakeResponse(200, ""),
+            ]
+        )
+
+        async def failed_legacy_source(*_args, **_kwargs):
+            raise api.LegacyAuthenticationError("port 80 login failed")
+
+        client._fetch_legacy_source = failed_legacy_source
+
+        data = await client.fetch_snapshot(session, previous=previous)
+
+        assert data.aps[mac].alias == "Updated alias"
+        assert data.aps[mac].online is True
+        assert data.ap_details[mac] == previous_detail
+        assert data.legacy_sources["olt"] == previous_source
+        assert data.last_success_80 == previous_time
+
+    asyncio.run(run())
+
+
+def test_fetch_snapshot_total_failure_does_not_mutate_previous_data() -> None:
     async def run() -> None:
         previous = models.RltechData(
             aps={
@@ -2013,6 +2401,11 @@ def test_fetch_snapshot_raises_when_8080_and_legacy_both_fail() -> None:
         try:
             await client.fetch_snapshot(session, previous=previous)
         except api.AccountBusyError:
+            assert previous.aps["44:95:3B:B8:DC:E0"].online is True
+            assert previous.aps["44:95:3B:B8:DC:E0"].alias == "House11_Office"
+            assert previous.last_success == datetime(
+                2026, 8, 30, 11, 1, tzinfo=UTC
+            )
             return
         raise AssertionError("expected original 8080 error")
 
