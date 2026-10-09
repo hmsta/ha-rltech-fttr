@@ -233,6 +233,13 @@ AP_DETAIL_SENSORS = (
         value_fn=lambda detail: detail.last_down_cause,
     ),
     ApDetailSensorDescription(
+        key="onu_status",
+        translation_key="ap_onu_status",
+        icon="mdi:fiber-optic",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda detail: detail.onu_status,
+    ),
+    ApDetailSensorDescription(
         key="source_host",
         translation_key="ap_source_host",
         icon="mdi:server-network",
@@ -426,6 +433,7 @@ SENSOR_NAMES = {
     "optical_tx_power": "Optical TX power",
     "reg_off_time": "Reg/Off Time",
     "last_down_cause": "Last off reason",
+    "onu_status": "ONU status",
     "source_host": "Source host",
     "cpu_temperature": "CPU temperature",
     "flash_usage": "Flash usage",
