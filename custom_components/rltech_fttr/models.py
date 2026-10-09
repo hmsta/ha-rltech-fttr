@@ -6,10 +6,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 
-LIVE_AP_DETAIL_KEYS = frozenset(
+MQTT_AP_HEALTH_KEYS = frozenset(
     {
-        "optical_rx_power",
-        "optical_tx_power",
         "cpu_usage",
         "cpu_temperature",
         "memory_usage",

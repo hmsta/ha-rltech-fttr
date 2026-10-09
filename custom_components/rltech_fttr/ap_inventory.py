@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .models import LIVE_AP_DETAIL_KEYS, RltechAp, RltechApDetail, RltechData
+from .models import MQTT_AP_HEALTH_KEYS, RltechAp, RltechApDetail, RltechData
 
 
 def _detail_fields(
@@ -28,7 +28,7 @@ def _detail_fields(
         "source_host": detail.source_host,
     }
     if online is False:
-        for key in LIVE_AP_DETAIL_KEYS:
+        for key in MQTT_AP_HEALTH_KEYS:
             fields[key] = None
     return fields
 

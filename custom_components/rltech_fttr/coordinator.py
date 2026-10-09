@@ -59,7 +59,7 @@ from .const import (
 from .hostname_enrichment import enrich_from_home_assistant_dhcp
 from .models import RltechData
 from .mqtt import (
-    clear_offline_ap_live_details,
+    clear_offline_ap_mqtt_health,
     MqttApHealthUpdate,
     MqttApStatusUpdate,
     MqttStationUpdate,
@@ -165,7 +165,7 @@ class RltechCoordinator(DataUpdateCoordinator[RltechData]):
             )
             data = enrich_station_vendors(data)
         data = self._age_stations(data, now)
-        data = clear_offline_ap_live_details(data)
+        data = clear_offline_ap_mqtt_health(data)
         self._last_data = data
         return data
 
@@ -239,6 +239,7 @@ class RltechCoordinator(DataUpdateCoordinator[RltechData]):
             data = self._age_stations(data, now)
         elif cmd == "XReport_ExtendInfo" and isinstance(update, MqttApHealthUpdate):
             data = merge_ap_health_update(data, update, now=now)
+            data = clear_offline_ap_mqtt_health(data)
             if update.mac in data.aps and update.assoc_count is not None:
                 self._record_mqtt_ap_field(update.mac, "assoc_count", now)
         elif cmd in {"APOnline", "APOffline"} and isinstance(

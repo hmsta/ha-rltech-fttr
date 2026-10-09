@@ -15,7 +15,7 @@ import struct
 from typing import Any
 
 from .models import (
-    LIVE_AP_DETAIL_KEYS,
+    MQTT_AP_HEALTH_KEYS,
     RltechAp,
     RltechApDetail,
     RltechData,
@@ -397,26 +397,26 @@ def merge_ap_status_update(
     aps[mac] = replace(ap, online=update.online)
     merged = replace(data, aps=aps)
     if update.online is False:
-        merged = clear_offline_ap_live_details(merged)
+        merged = clear_offline_ap_mqtt_health(merged)
     if aps[mac] == ap and merged.ap_details is data.ap_details:
         return data
     return merged
 
 
-def clear_offline_ap_live_details(data: RltechData) -> RltechData:
-    """Clear live-only AP diagnostics for every AP currently offline."""
+def clear_offline_ap_mqtt_health(data: RltechData) -> RltechData:
+    """Clear MQTT health diagnostics for every AP currently offline."""
     details = data.ap_details
     for mac, ap in data.aps.items():
         detail = details.get(mac)
         if ap.online is not False or detail is None:
             continue
-        if not any(getattr(detail, key) is not None for key in LIVE_AP_DETAIL_KEYS):
+        if not any(getattr(detail, key) is not None for key in MQTT_AP_HEALTH_KEYS):
             continue
         if details is data.ap_details:
             details = dict(details)
         details[mac] = replace(
             detail,
-            **{key: None for key in LIVE_AP_DETAIL_KEYS},
+            **{key: None for key in MQTT_AP_HEALTH_KEYS},
         )
     if details is data.ap_details:
         return data

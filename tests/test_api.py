@@ -714,7 +714,7 @@ def test_mqtt_ap_lifecycle_can_match_by_sn() -> None:
     assert merged.aps[mac].online is True
 
 
-def test_mqtt_ap_offline_clears_live_diagnostics_but_keeps_history() -> None:
+def test_mqtt_ap_offline_clears_mqtt_health_but_keeps_port80_data() -> None:
     mac = "44:95:3B:B8:DC:D0"
     data = models.RltechData(
         aps={mac: models.RltechAp(mac=mac, sn="RLGM3BB8DCD0", online=True)},
@@ -742,8 +742,10 @@ def test_mqtt_ap_offline_clears_live_diagnostics_but_keeps_history() -> None:
     detail = merged.ap_details[mac]
 
     assert merged.aps[mac].online is False
-    for key in models.LIVE_AP_DETAIL_KEYS:
+    for key in models.MQTT_AP_HEALTH_KEYS:
         assert getattr(detail, key) is None
+    assert detail.optical_rx_power == -15.4
+    assert detail.optical_tx_power == -1.8
     assert detail.last_down_cause == "dying_gasp"
     assert detail.reg_off_time == datetime(2026, 8, 21, 11, 0, tzinfo=UTC)
     assert detail.source_host == "172.20.11.2"
@@ -1036,7 +1038,7 @@ def test_mqtt_live_overlay_does_not_preserve_unrelated_ap_field() -> None:
     assert merged.aps[mac].online is False
 
 
-def test_offline_ap_live_diagnostics_stay_cleared_after_http_merge() -> None:
+def test_offline_ap_mqtt_health_clears_without_removing_port80_optics() -> None:
     mac = "44:95:3B:B8:DC:D0"
     data = models.RltechData(
         aps={mac: models.RltechAp(mac=mac, online=False)},
@@ -1050,9 +1052,9 @@ def test_offline_ap_live_diagnostics_stay_cleared_after_http_merge() -> None:
         },
     )
 
-    normalized = mqtt.clear_offline_ap_live_details(data)
+    normalized = mqtt.clear_offline_ap_mqtt_health(data)
 
-    assert normalized.ap_details[mac].optical_rx_power is None
+    assert normalized.ap_details[mac].optical_rx_power == -15.4
     assert normalized.ap_details[mac].cpu_usage is None
     assert normalized.ap_details[mac].last_down_cause == "pon_los"
 
@@ -1432,7 +1434,7 @@ def test_last_down_cause_is_normalized_for_automations() -> None:
     assert models.normalize_last_down_cause("99") == "unknown"
 
 
-def test_offline_ap_row_hides_live_detail_values() -> None:
+def test_offline_ap_row_hides_mqtt_health_but_shows_port80_connectivity() -> None:
     ap = models.RltechAp(mac="44:95:3B:B8:DC:E0", online=False)
     detail = models.RltechApDetail(
         optical_rx_power=-15.46,
@@ -1444,13 +1446,17 @@ def test_offline_ap_row_hides_live_detail_values() -> None:
         last_boot=datetime(2026, 8, 20, tzinfo=UTC),
         reg_off_time=datetime(2026, 8, 21, tzinfo=UTC),
         last_down_cause="dying_gasp",
+        onu_status="online",
         source_host="172.20.11.1",
     )
 
     row = ap_inventory.ap_to_row(ap, detail=detail)
 
-    for key in models.LIVE_AP_DETAIL_KEYS:
+    for key in models.MQTT_AP_HEALTH_KEYS:
         assert row[key] is None
+    assert row["optical_rx_power"] == -15.46
+    assert row["optical_tx_power"] == -1.79
+    assert row["onu_status"] == "online"
     assert row["reg_off_time"] == "2026-08-21T00:00:00+00:00"
     assert row["last_down_cause"] == "dying_gasp"
     assert row["source_host"] == "172.20.11.1"
@@ -1463,13 +1469,14 @@ def test_legacy_onu_details_join_to_aps_by_serial() -> None:
         mac="44:95:3B:B8:DC:E0",
         sn="RLGM3BB8DCE0",
         alias="House11_Office",
-        online=True,
+        online=False,
     )
     details = {
         "RLGM3BB8DCE0": models.RltechApDetail(
             sn="RLGM3BB8DCE0",
             optical_tx_power=-1.79,
             optical_rx_power=-15.46,
+            onu_status="online",
             reg_off_time=datetime(2026, 8, 21, 6, 12, 26, tzinfo=UTC),
         )
     }
@@ -1493,6 +1500,8 @@ def test_legacy_onu_details_join_to_aps_by_serial() -> None:
     assert joined[ap.mac].sn == "RLGM3BB8DCE0"
     assert joined[ap.mac].mac == ap.mac
     assert joined[ap.mac].alias == "House11_Office"
+    assert joined[ap.mac].online is False
+    assert joined[ap.mac].onu_status == "online"
     assert joined[ap.mac].optical_rx_power == -15.46
     assert joined[ap.mac].last_update == now
     assert joined[ap.mac].sys_duration == 7200

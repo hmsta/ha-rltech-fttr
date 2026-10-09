@@ -48,7 +48,7 @@ from .identifiers import (
     lan_port_sensor_object_id,
 )
 from .models import (
-    LIVE_AP_DETAIL_KEYS,
+    MQTT_AP_HEALTH_KEYS,
     RltechAp,
     RltechApDetail,
     RltechData,
@@ -899,7 +899,7 @@ class RltechApDetailSensor(RltechEntity, SensorEntity):
         detail = self._detail
         ap = self._ap
         if (
-            self.entity_description.key in LIVE_AP_DETAIL_KEYS
+            self.entity_description.key in MQTT_AP_HEALTH_KEYS
             and ap is not None
             and ap.online is False
         ):
