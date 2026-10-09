@@ -85,7 +85,17 @@ class RltechApRebootButton(RltechEntity, ButtonEntity):
     @property
     def device_info(self):
         ap = self._ap
-        return ap_device_info(self.config_entry, self._mac, ap)
+        detail = (
+            self.coordinator.data.ap_details.get(self._mac)
+            if self.coordinator.data is not None
+            else None
+        )
+        return ap_device_info(
+            self.config_entry,
+            self._mac,
+            ap,
+            source_host=detail.source_host if detail else None,
+        )
 
     async def async_press(self) -> None:
         """Reboot the AP."""

@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import logging
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.components.lovelace.const import (
@@ -15,11 +16,13 @@ from homeassistant.components.lovelace.const import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_URL
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import (
     AP_CARD_FILENAME,
     AP_CARD_URL,
+    CONF_BASE_URL,
     DOMAIN,
     PLATFORMS,
     STATION_CARD_FILENAME,
@@ -36,6 +39,70 @@ _CARD_RESOURCE_FILES = {
     STATION_CARD_URL: STATION_CARD_FILENAME,
     AP_CARD_URL: AP_CARD_FILENAME,
 }
+
+
+@callback
+def _remove_obsolete_primary_legacy_device(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    coordinator: RltechCoordinator,
+) -> None:
+    """Merge and remove the old duplicate device for the configured primary OLT."""
+    base_url = str(entry.data.get(CONF_BASE_URL, ""))
+    parsed = urlsplit(base_url)
+    host = parsed.hostname or parsed.netloc.split(":", 1)[0] or base_url
+    if not host:
+        return
+    device_registry = dr.async_get(hass)
+    canonical = device_registry.async_get_device(
+        identifiers={(DOMAIN, entry.entry_id)}
+    )
+    duplicate = device_registry.async_get_device(
+        identifiers={(DOMAIN, f"{entry.entry_id}_legacy_olt_{host}")}
+    )
+    if canonical is None or duplicate is None:
+        return
+    source = coordinator.data.legacy_sources.get(host) if coordinator.data else None
+    status = source.olt_status if source is not None else None
+    metadata = {
+        "manufacturer": (
+            status.manufacturer
+            if status and status.manufacturer
+            else duplicate.manufacturer
+        ),
+        "model": (
+            status.gateway_type
+            if status and status.gateway_type
+            else duplicate.model
+        ),
+        "hw_version": (
+            status.hardware_version
+            if status and status.hardware_version
+            else duplicate.hw_version
+        ),
+        "sw_version": (
+            status.software_version
+            if status and status.software_version
+            else duplicate.sw_version
+        ),
+        "serial_number": (
+            status.serial_number
+            if status and status.serial_number
+            else duplicate.serial_number
+        ),
+    }
+    updates = {key: value for key, value in metadata.items() if value is not None}
+    if updates:
+        device_registry.async_update_device(canonical.id, **updates)
+    entity_registry = er.async_get(hass)
+    for entity in er.async_entries_for_device(
+        entity_registry,
+        duplicate.id,
+        include_disabled_entities=True,
+    ):
+        entity_registry.async_remove(entity.entity_id)
+    device_registry.async_remove_device(duplicate.id)
+    _LOGGER.info("Removed obsolete duplicate primary OLT device for %s", host)
 
 
 def _get_lovelace_data(hass: HomeAssistant):
@@ -147,6 +214,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await coordinator.async_start_station_aging()
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+    _remove_obsolete_primary_legacy_device(hass, entry, coordinator)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     await coordinator.async_start_mqtt()
     return True

@@ -11,6 +11,7 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import CONF_BASE_URL, DOMAIN
+from .ap_device_registry import ap_parent_identifier
 from .coordinator import RltechCoordinator
 from .models import RltechAp, RltechOltStatus
 
@@ -75,7 +76,13 @@ def legacy_olt_device_info(
     )
 
 
-def ap_device_info(entry: ConfigEntry, mac: str, ap: RltechAp | None) -> DeviceInfo:
+def ap_device_info(
+    entry: ConfigEntry,
+    mac: str,
+    ap: RltechAp | None,
+    *,
+    source_host: str | None = None,
+) -> DeviceInfo:
     """Return AP device info."""
     hardware_id = ap.sn if ap else None
     configuration_url = urlunsplit(("http", ap.ip, "", "", "")) if ap and ap.ip else None
@@ -88,5 +95,12 @@ def ap_device_info(entry: ConfigEntry, mac: str, ap: RltechAp | None) -> DeviceI
         sw_version=ap.version if ap else None,
         serial_number=ap.sn if ap else None,
         configuration_url=configuration_url,
-        via_device=(DOMAIN, entry.entry_id),
+        via_device=(
+            DOMAIN,
+            ap_parent_identifier(
+                entry.entry_id,
+                _base_url_to_host(entry.data[CONF_BASE_URL]),
+                source_host,
+            ),
+        ),
     )

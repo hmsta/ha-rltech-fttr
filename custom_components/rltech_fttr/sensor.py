@@ -33,7 +33,7 @@ from .const import (
     DEFAULT_ENABLE_MQTT,
     DOMAIN,
 )
-from .ap_device_registry import ap_device_registry_updates
+from .ap_device_registry import ap_device_registry_updates, ap_parent_identifier
 from .coordinator import RltechCoordinator
 from .entity import (
     RltechEntity,
@@ -235,8 +235,7 @@ AP_DETAIL_SENSORS = (
     ApDetailSensorDescription(
         key="onu_status",
         translation_key="ap_onu_status",
-        icon="mdi:fiber-optic",
-        entity_category=EntityCategory.DIAGNOSTIC,
+        icon="mdi:lan-connect",
         value_fn=lambda detail: detail.onu_status,
     ),
     ApDetailSensorDescription(
@@ -659,10 +658,6 @@ async def _async_sync_ap_device_registry(
     """Sync mutable AP device registry metadata."""
     area_id = entry.data.get(CONF_AP_AREA_ID)
     device_registry = dr.async_get(hass)
-    controller = device_registry.async_get_device(
-        identifiers={(DOMAIN, entry.entry_id)}
-    )
-    controller_device_id = controller.id if controller else None
     controller_host = _entry_host(entry)
     pending = {ap.sn: ap for ap in aps if ap.sn}
     for _ in range(5):
@@ -677,14 +672,14 @@ async def _async_sync_ap_device_registry(
             source_host = source_hosts.get(sn)
             parent_device_id = None
             parent_pending = False
-            if source_host == controller_host:
-                parent_device_id = controller_device_id
-                parent_pending = controller_device_id is None
-            elif source_host in known_olt_hosts:
+            if source_host in known_olt_hosts:
+                parent_identifier = ap_parent_identifier(
+                    entry.entry_id,
+                    controller_host,
+                    source_host,
+                )
                 parent = device_registry.async_get_device(
-                    identifiers={
-                        (DOMAIN, f"{entry.entry_id}_legacy_olt_{source_host}")
-                    }
+                    identifiers={(DOMAIN, parent_identifier)}
                 )
                 if parent is not None:
                     parent_device_id = parent.id
@@ -864,7 +859,17 @@ class RltechApSensor(RltechEntity, SensorEntity):
     @property
     def device_info(self):
         ap = self._ap
-        return ap_device_info(self.config_entry, self._mac, ap)
+        detail = (
+            self.coordinator.data.ap_details.get(self._mac)
+            if self.coordinator.data is not None
+            else None
+        )
+        return ap_device_info(
+            self.config_entry,
+            self._mac,
+            ap,
+            source_host=detail.source_host if detail else None,
+        )
 
     @property
     def _ap(self) -> RltechAp | None:
@@ -926,7 +931,13 @@ class RltechApDetailSensor(RltechEntity, SensorEntity):
     @property
     def device_info(self):
         ap = self._ap
-        return ap_device_info(self.config_entry, self._mac, ap)
+        detail = self._detail
+        return ap_device_info(
+            self.config_entry,
+            self._mac,
+            ap,
+            source_host=detail.source_host if detail else None,
+        )
 
     @property
     def _ap(self) -> RltechAp | None:

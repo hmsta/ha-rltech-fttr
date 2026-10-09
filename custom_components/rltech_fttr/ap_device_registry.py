@@ -8,6 +8,17 @@ from urllib.parse import urlunsplit
 from .models import RltechAp
 
 
+def ap_parent_identifier(
+    entry_id: str,
+    controller_host: str,
+    source_host: str | None,
+) -> str:
+    """Return the canonical parent device identifier for one AP."""
+    if not source_host or source_host == controller_host:
+        return entry_id
+    return f"{entry_id}_legacy_olt_{source_host}"
+
+
 def ap_configuration_url(ap: RltechAp) -> str | None:
     """Return the AP web UI URL when the AP has an IP address."""
     if not ap.ip:

@@ -132,6 +132,27 @@ def test_ap_device_registry_updates_preserve_parent_without_known_source() -> No
     ) == {}
 
 
+def test_ap_parent_identifier_uses_canonical_primary_and_slave_devices() -> None:
+    entry_id = "entry"
+
+    assert (
+        ap_device_registry.ap_parent_identifier(entry_id, "172.20.11.1", None)
+        == entry_id
+    )
+    assert (
+        ap_device_registry.ap_parent_identifier(
+            entry_id, "172.20.11.1", "172.20.11.1"
+        )
+        == entry_id
+    )
+    assert (
+        ap_device_registry.ap_parent_identifier(
+            entry_id, "172.20.11.1", "172.20.11.2"
+        )
+        == "entry_legacy_olt_172.20.11.2"
+    )
+
+
 def test_eboo_value_vector() -> None:
     fields = [
         ("pageidx_rows", "1,100"),
