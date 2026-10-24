@@ -508,6 +508,7 @@ def test_mqtt_station_update_merges_into_station_inventory() -> None:
                             "RxNegoRate": "585",
                             "TxNegoRate": "864",
                             "UpTime": "5457",
+                            "ToTalcnt": "123.45",
                             "Status": "1",
                         }
                     ]
@@ -524,6 +525,7 @@ def test_mqtt_station_update_merges_into_station_inventory() -> None:
     assert station.bandwidth == "20/40/80 MHz"
     assert station.last_seen == now
     assert station.reported_online is True
+    assert station.total_count == "123.45"
 
 
 def test_mqtt_station_update_preserves_existing_hostname() -> None:
@@ -604,6 +606,7 @@ def test_mqtt_station_update_preserves_unreported_fields() -> None:
         band="5 GHz",
         bandwidth="20/40/80 MHz",
         vlan=40,
+        total_count="88.00",
     )
     data = models.RltechData(stations={previous.mac: previous})
     update = [mqtt.MqttStationUpdate(mac=previous.mac, reported_online=True)]
@@ -619,6 +622,32 @@ def test_mqtt_station_update_preserves_unreported_fields() -> None:
     assert station.rssi == -65
     assert station.tx_nego_rate == 864
     assert station.bandwidth == "20/40/80 MHz"
+    assert station.total_count == "88.00"
+
+
+def test_mqtt_station_update_preserves_zero_total_count() -> None:
+    now = datetime(2026, 8, 21, 12, 0, tzinfo=UTC)
+    data = models.RltechData()
+    cmd, updates = mqtt.parse_mqtt_payload(
+        json.dumps(
+            {
+                "Cmd": "XReport_StaList",
+                "Data": {
+                    "List": [
+                        {
+                            "Mac": "7C45D04C1759",
+                            "Status": 1,
+                            "ToTalcnt": 0,
+                        }
+                    ]
+                },
+            }
+        )
+    )
+
+    assert cmd == "XReport_StaList"
+    merged = mqtt.merge_station_updates(data, updates, now=now)
+    assert merged.stations["7C:45:D0:4C:17:59"].total_count == "0"
 
 
 def test_mqtt_stats_exposes_last_station_message() -> None:

@@ -63,6 +63,7 @@ class MqttStationUpdate:
     rx_nego_rate: float | None = None
     tx_nego_rate: float | None = None
     uptime: int | None = None
+    total_count: str | None = None
     reported_online: bool = True
 
 
@@ -206,6 +207,7 @@ def parse_station_list(message: dict[str, Any]) -> list[MqttStationUpdate]:
                 rx_nego_rate=_float(row.get("RxNegoRate")),
                 tx_nego_rate=_float(row.get("TxNegoRate")),
                 uptime=_int(row.get("UpTime")),
+                total_count=_optional_text(row.get("ToTalcnt")),
                 reported_online=status != 0,
             )
         )
@@ -300,7 +302,9 @@ def merge_station_updates(
             band=update.band or (previous.band if previous else None),
             bandwidth=update.bandwidth or (previous.bandwidth if previous else None),
             vlan=_new_or_previous(update.vlan, previous.vlan if previous else None),
-            total_count=previous.total_count if previous else None,
+            total_count=_new_or_previous(
+                update.total_count, previous.total_count if previous else None
+            ),
             update_time=previous.update_time if previous else None,
         )
     return replace(data, stations=stations)
@@ -949,6 +953,13 @@ def _first_normalized(
 def _none_if_empty(value: Any) -> str | None:
     text = str(value or "").strip()
     return text or None
+
+
+def _optional_text(value: Any) -> str | None:
+    """Return stripped text while preserving numeric zero."""
+    if value is None:
+        return None
+    return str(value).strip() or None
 
 
 def _int(value: Any) -> int | None:
