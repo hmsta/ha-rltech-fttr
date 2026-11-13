@@ -757,6 +757,40 @@ def test_mqtt_station_update_merges_into_station_inventory() -> None:
     assert station.total_count == "123.45"
 
 
+def test_mqtt_station_report_marks_known_ap_online() -> None:
+    now = datetime(2026, 8, 21, 12, 0, tzinfo=UTC)
+    ap_mac = "44:95:3B:B8:DC:D0"
+    data = models.RltechData(
+        aps={ap_mac: models.RltechAp(mac=ap_mac, online=False)}
+    )
+    update = [
+        mqtt.MqttStationUpdate(
+            mac="7C:45:D0:4C:17:59",
+            ap_mac=ap_mac,
+            reported_online=True,
+        )
+    ]
+
+    merged = mqtt.merge_station_updates(data, update, now=now)
+
+    assert merged.aps[ap_mac].online is True
+
+
+def test_mqtt_station_report_does_not_create_unknown_ap() -> None:
+    now = datetime(2026, 8, 21, 12, 0, tzinfo=UTC)
+    update = [
+        mqtt.MqttStationUpdate(
+            mac="7C:45:D0:4C:17:59",
+            ap_mac="44:95:3B:B8:FF:FF",
+            reported_online=True,
+        )
+    ]
+
+    merged = mqtt.merge_station_updates(models.RltechData(), update, now=now)
+
+    assert merged.aps == {}
+
+
 def test_mqtt_station_update_preserves_existing_hostname() -> None:
     now = datetime(2026, 8, 21, 12, 0, tzinfo=UTC)
     previous = models.RltechStation(
@@ -934,6 +968,7 @@ def test_mqtt_ap_health_updates_known_ap_only_and_stabilizes_boot_time() -> None
     assert detail.memory_usage == 30
     assert detail.flash_usage == 86
     assert detail.last_boot == previous_boot
+    assert merged.aps[ap.mac].online is True
 
     unknown = mqtt.MqttApHealthUpdate(mac="44:95:3B:B8:FF:FF", assoc_count=99)
     assert mqtt.merge_ap_health_update(data, unknown, now=now) is data

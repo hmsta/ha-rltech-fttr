@@ -264,9 +264,15 @@ def merge_station_updates(
     """Merge MQTT station updates into an existing coordinator snapshot."""
     if not updates:
         return data
+    aps = data.aps
     stations = dict(data.stations)
     for update in updates:
-        ap_alias = data.aps.get(update.ap_mac or "").alias if update.ap_mac else None
+        known_ap = data.aps.get(update.ap_mac or "")
+        ap_alias = known_ap.alias if known_ap is not None else None
+        if update.ap_mac in data.aps and data.aps[update.ap_mac].online is not True:
+            if aps is data.aps:
+                aps = dict(data.aps)
+            aps[update.ap_mac] = replace(data.aps[update.ap_mac], online=True)
         previous = stations.get(update.mac)
         hostname = update.hostname or (previous.hostname if previous else None)
         stations[update.mac] = RltechStation(
@@ -315,7 +321,7 @@ def merge_station_updates(
             ),
             update_time=previous.update_time if previous else None,
         )
-    return replace(data, stations=stations)
+    return replace(data, aps=aps, stations=stations)
 
 
 def merge_ap_health_update(
@@ -329,8 +335,15 @@ def merge_ap_health_update(
         return data
     aps = dict(data.aps)
     ap = aps[update.mac]
-    if update.assoc_count is not None:
-        aps[update.mac] = replace(ap, assoc_count=update.assoc_count)
+    aps[update.mac] = replace(
+        ap,
+        online=True,
+        assoc_count=(
+            update.assoc_count
+            if update.assoc_count is not None
+            else ap.assoc_count
+        ),
+    )
 
     details = dict(data.ap_details)
     previous = details.get(update.mac)

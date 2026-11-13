@@ -249,14 +249,42 @@ class RltechCoordinator(DataUpdateCoordinator[RltechData]):
             return
         if cmd == "XReport_StaList" and isinstance(update, list):
             data = merge_station_updates(data, update, now=now)
+            reporting_ap_macs = {
+                station.ap_mac
+                for station in update
+                if station.ap_mac is not None and station.ap_mac in data.aps
+            }
+            for mac in reporting_ap_macs:
+                self._ap_ip_ownership.observe_mqtt_status(
+                    data.aps,
+                    mac=mac,
+                    online=True,
+                    reported_ip=None,
+                    now=now,
+                )
+                self._record_mqtt_ap_field(mac, "online", now)
+            if reporting_ap_macs:
+                data = self._ap_ip_ownership.apply(data)
+                self._sync_ap_ip_conflict_issues(data)
             data = self._maybe_enrich_mqtt_station_hostnames(data, now)
             data = enrich_station_vendors(data)
             data = self._age_stations(data, now)
         elif cmd == "XReport_ExtendInfo" and isinstance(update, MqttApHealthUpdate):
             data = merge_ap_health_update(data, update, now=now)
             data = clear_offline_ap_mqtt_health(data)
-            if update.mac in data.aps and update.assoc_count is not None:
-                self._record_mqtt_ap_field(update.mac, "assoc_count", now)
+            if update.mac in data.aps:
+                self._ap_ip_ownership.observe_mqtt_status(
+                    data.aps,
+                    mac=update.mac,
+                    online=True,
+                    reported_ip=None,
+                    now=now,
+                )
+                data = self._ap_ip_ownership.apply(data)
+                self._sync_ap_ip_conflict_issues(data)
+                self._record_mqtt_ap_field(update.mac, "online", now)
+                if update.assoc_count is not None:
+                    self._record_mqtt_ap_field(update.mac, "assoc_count", now)
         elif cmd in {"APOnline", "APOffline"} and isinstance(
             update, MqttApStatusUpdate
         ):
