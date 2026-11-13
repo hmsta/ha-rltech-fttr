@@ -40,10 +40,7 @@ def ap_device_registry_updates(
         updates["sw_version"] = ap.version
 
     configuration_url = ap_configuration_url(ap)
-    if (
-        configuration_url
-        and getattr(device, "configuration_url", None) != configuration_url
-    ):
+    if getattr(device, "configuration_url", None) != configuration_url:
         updates["configuration_url"] = configuration_url
 
     if (

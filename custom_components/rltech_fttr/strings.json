@@ -91,6 +91,12 @@
       "reconfigure_successful": "Reconfiguration successful."
     }
   },
+  "issues": {
+    "duplicate_ap_ip": {
+      "title": "Duplicate AP IP address",
+      "description": "IP address {ip} is being reported by multiple online RLTech APs: {claimants}. Direct AP actions are disabled for every affected AP until the conflict is resolved."
+    }
+  },
   "entity": {
     "button": {
       "ap_reboot": { "name": "Reboot" }

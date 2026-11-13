@@ -28,7 +28,11 @@ from .const import (
     STATION_CARD_FILENAME,
     STATION_CARD_URL,
 )
-from .coordinator import RltechCoordinator, build_client
+from .coordinator import (
+    RltechCoordinator,
+    async_clear_ap_ip_conflict_issues,
+    build_client,
+)
 from .oui_enrichment import async_load_oui
 from .websocket import async_setup_websocket
 
@@ -234,3 +238,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await coordinator.client.logout(async_get_clientsession(hass))
     hass.data[DOMAIN].pop(entry.entry_id)
     return True
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Clean up persistent issues when a config entry is removed."""
+    async_clear_ap_ip_conflict_issues(hass, entry.entry_id)

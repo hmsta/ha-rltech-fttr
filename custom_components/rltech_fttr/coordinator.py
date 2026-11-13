@@ -14,11 +14,14 @@ from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.helpers import issue_registry as ir
+from homeassistant.helpers.issue_registry import IssueSeverity
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.helpers.update_coordinator import UpdateFailed
 from homeassistant.util import dt as dt_util
 
 from .api import AccountBusyError, AuthenticationError, RltechClient
+from .ap_ip_ownership import ApIpOwnershipTracker
 from .const import (
     CONF_BASE_URL,
     CONF_ENABLE_AP_POLLING,
@@ -75,6 +78,7 @@ from .station_freshness import age_station_data, effective_station_retention
 
 _LOGGER = logging.getLogger(__name__)
 STATION_AGING_INTERVAL = timedelta(seconds=60)
+AP_IP_CONFLICT_ISSUE_PREFIX = "duplicate_ap_ip_"
 
 
 class RltechCoordinator(DataUpdateCoordinator[RltechData]):
@@ -98,6 +102,7 @@ class RltechCoordinator(DataUpdateCoordinator[RltechData]):
         )
         self._last_mqtt_hostname_enrichment: datetime | None = None
         self._mqtt_ap_field_updates: dict[str, dict[str, datetime]] = {}
+        self._ap_ip_ownership = ApIpOwnershipTracker()
         super().__init__(
             hass,
             _LOGGER,
@@ -149,6 +154,8 @@ class RltechCoordinator(DataUpdateCoordinator[RltechData]):
             raise UpdateFailed("RLTech Web UI account is already in use") from err
         except Exception as err:
             raise UpdateFailed(f"Unable to fetch RLTech FTTR data: {err}") from err
+        http_inventory_aps = data.aps
+        ap_inventory_succeeded = self._ap_inventory_succeeded(data, previous)
         try:
             data = enrich_from_home_assistant_dhcp(self.hass, data)
         except Exception as err:  # pragma: no cover - defensive around HA internals
@@ -166,6 +173,14 @@ class RltechCoordinator(DataUpdateCoordinator[RltechData]):
             data = enrich_station_vendors(data)
         data = self._age_stations(data, now)
         data = clear_offline_ap_mqtt_health(data)
+        if ap_inventory_succeeded:
+            self._ap_ip_ownership.observe_http_inventory(
+                http_inventory_aps,
+                now=now,
+                protected_fields=live_ap_fields,
+            )
+        data = self._ap_ip_ownership.apply(data)
+        self._sync_ap_ip_conflict_issues(data)
         self._last_data = data
         return data
 
@@ -248,6 +263,15 @@ class RltechCoordinator(DataUpdateCoordinator[RltechData]):
             data = merge_ap_status_update(data, update)
             mac = self._mqtt_status_ap_mac(update, data)
             if mac is not None:
+                self._ap_ip_ownership.observe_mqtt_status(
+                    data.aps,
+                    mac=mac,
+                    online=update.online,
+                    reported_ip=update.ip,
+                    now=now,
+                )
+                data = self._ap_ip_ownership.apply(data)
+                self._sync_ap_ip_conflict_issues(data)
                 self._record_mqtt_ap_field(mac, "online", now)
                 if update.online and update.version is not None:
                     self._record_mqtt_ap_field(mac, "version", now)
@@ -264,6 +288,69 @@ class RltechCoordinator(DataUpdateCoordinator[RltechData]):
                 f"{SIGNAL_STATIONS_CHANGED}_{self.config_entry.entry_id}",
                 now,
             )
+
+    def ap_direct_action_unavailable_reason(self, mac: str) -> str | None:
+        """Return why a direct AP action is unsafe, or None when allowed."""
+        if self.data is None or (ap := self.data.aps.get(mac)) is None:
+            return "AP is not available"
+        if ap.online is not True:
+            return "AP is not currently online"
+        if self._ap_ip_ownership.is_conflicted(mac):
+            return "AP IP address is claimed by multiple online APs"
+        if not ap.ip:
+            return "AP has no current IP address"
+        return None
+
+    def _ap_inventory_succeeded(
+        self,
+        data: RltechData,
+        previous: RltechData | None,
+    ) -> bool:
+        """Return whether this cycle completed an enabled AP inventory poll."""
+        if not self.config_entry.data.get(
+            CONF_ENABLE_AP_POLLING, DEFAULT_ENABLE_AP_POLLING
+        ):
+            return False
+        if data.last_success_8080 is None:
+            return False
+        return previous is None or data.last_success_8080 != previous.last_success_8080
+
+    def _sync_ap_ip_conflict_issues(self, data: RltechData) -> None:
+        """Create and remove Repairs issues for current AP IP conflicts."""
+        active_issue_ids: set[str] = set()
+        for ip, conflict in self._ap_ip_ownership.conflicts.items():
+            issue_id = _ap_ip_conflict_issue_id(self.config_entry.entry_id, ip)
+            active_issue_ids.add(issue_id)
+            claimant_text: list[str] = []
+            for mac in conflict.claimant_macs:
+                ap = data.aps.get(mac)
+                claim = self._ap_ip_ownership.claim_for(mac)
+                name = ap.alias if ap and ap.alias else ap.sn if ap and ap.sn else mac
+                claimant_text.append(
+                    f"{name} (SN {ap.sn if ap and ap.sn else 'unknown'}, "
+                    f"MAC {mac}, source {claim.source.upper() if claim else 'unknown'})"
+                )
+            claimants = "; ".join(claimant_text)
+            issue_kwargs = {}
+            if hasattr(ir.IssueEntry, "config_entry_id"):
+                issue_kwargs["config_entry_id"] = self.config_entry.entry_id
+            ir.async_create_issue(
+                self.hass,
+                DOMAIN,
+                issue_id,
+                data={"ip": ip, "claimants": claimants},
+                is_fixable=False,
+                is_persistent=True,
+                severity=IssueSeverity.ERROR,
+                translation_key="duplicate_ap_ip",
+                translation_placeholders={"ip": ip, "claimants": claimants},
+                **issue_kwargs,
+            )
+
+        for issue_id in _ap_ip_conflict_issue_ids(
+            self.hass, self.config_entry.entry_id
+        ) - active_issue_ids:
+            ir.async_delete_issue(self.hass, DOMAIN, issue_id)
 
     def _record_mqtt_ap_field(self, mac: str, field: str, now: datetime) -> None:
         """Remember when MQTT last supplied one authoritative AP field."""
@@ -447,4 +534,30 @@ def _legacy_hosts_from_entry(entry: ConfigEntry) -> list[str]:
         if item not in hosts:
             hosts.append(item)
     return [f"http://{item}" for item in hosts]
+
+
+def _ap_ip_conflict_issue_id(entry_id: str, ip: str) -> str:
+    """Return a stable Repairs issue ID for one conflicting IP."""
+    safe_ip = re.sub(r"[^a-zA-Z0-9]+", "_", ip).strip("_")
+    return f"{AP_IP_CONFLICT_ISSUE_PREFIX}{entry_id}_{safe_ip}"
+
+
+def _ap_ip_conflict_issue_ids(hass: HomeAssistant, entry_id: str) -> set[str]:
+    """Return existing AP IP conflict issue IDs for one config entry."""
+    prefix = f"{AP_IP_CONFLICT_ISSUE_PREFIX}{entry_id}_"
+    registry = ir.async_get(hass)
+    return {
+        issue_id
+        for (domain, issue_id), issue in registry.issues.items()
+        if domain == DOMAIN
+        and issue_id.startswith(prefix)
+        and getattr(issue, "config_entry_id", entry_id) == entry_id
+    }
+
+
+@callback
+def async_clear_ap_ip_conflict_issues(hass: HomeAssistant, entry_id: str) -> None:
+    """Remove all AP IP conflict issues for a removed config entry."""
+    for issue_id in _ap_ip_conflict_issue_ids(hass, entry_id):
+        ir.async_delete_issue(hass, DOMAIN, issue_id)
 

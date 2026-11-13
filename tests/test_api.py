@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from importlib import util
 import json
@@ -24,6 +25,7 @@ def load_module(name: str):
 
 
 models = load_module("models")
+ap_ip_ownership = load_module("ap_ip_ownership")
 ap_device_registry = load_module("ap_device_registry")
 api = load_module("api")
 identifiers = load_module("identifiers")
@@ -88,7 +90,7 @@ def test_ap_device_registry_updates_mutable_metadata_only() -> None:
     assert "manufacturer" not in updates
 
 
-def test_ap_device_registry_updates_do_not_clear_missing_values() -> None:
+def test_ap_device_registry_updates_clear_stale_configuration_url() -> None:
     ap = models.RltechAp(
         mac="44:95:3B:B8:DC:D0",
         ip=None,
@@ -107,7 +109,234 @@ def test_ap_device_registry_updates_do_not_clear_missing_values() -> None:
         device,
         parent_device_id="controller-1",
         area_id="network",
-    ) == {}
+    ) == {"configuration_url": None}
+
+
+def test_ap_ip_online_claim_displaces_offline_owner() -> None:
+    now = datetime(2026, 10, 21, 10, 0, tzinfo=UTC)
+    old_mac = "44:95:3B:B8:DD:10"
+    new_mac = "44:95:3B:B8:E3:50"
+    tracker = ap_ip_ownership.ApIpOwnershipTracker()
+    data = models.RltechData(
+        aps={
+            old_mac: models.RltechAp(
+                mac=old_mac,
+                sn="RLGM3BB8DD10",
+                alias="House71",
+                ip="172.20.11.12",
+                online=False,
+            ),
+            new_mac: models.RltechAp(
+                mac=new_mac,
+                sn="RLGM3BB8E350",
+                alias="House89",
+                ip="172.20.11.12",
+                online=True,
+            ),
+        }
+    )
+
+    tracker.observe_http_inventory(data.aps, now=now)
+    reconciled = tracker.apply(data)
+
+    assert reconciled.aps[old_mac].ip is None
+    assert reconciled.aps[new_mac].ip == "172.20.11.12"
+    assert not tracker.conflicts
+
+
+def test_ap_ip_two_online_claimants_keep_newest_and_conflict() -> None:
+    now = datetime(2026, 10, 21, 10, 0, tzinfo=UTC)
+    old_mac = "44:95:3B:B8:DD:10"
+    new_mac = "44:95:3B:B8:E3:50"
+    tracker = ap_ip_ownership.ApIpOwnershipTracker()
+    baseline = models.RltechData(
+        aps={
+            old_mac: models.RltechAp(
+                mac=old_mac,
+                sn="RLGM3BB8DD10",
+                ip="172.20.11.12",
+                online=True,
+            ),
+            new_mac: models.RltechAp(
+                mac=new_mac,
+                sn="RLGM3BB8E350",
+                online=False,
+            ),
+        }
+    )
+    tracker.observe_http_inventory(baseline.aps, now=now)
+
+    reported = models.RltechData(
+        aps={
+            old_mac: baseline.aps[old_mac],
+            new_mac: models.RltechAp(
+                mac=new_mac,
+                sn="RLGM3BB8E350",
+                ip="172.20.11.12",
+                online=True,
+            ),
+        }
+    )
+    tracker.observe_mqtt_status(
+        reported.aps,
+        mac=new_mac,
+        online=True,
+        reported_ip="172.20.11.12",
+        now=now + timedelta(seconds=10),
+    )
+    reconciled = tracker.apply(reported)
+
+    assert reconciled.aps[old_mac].ip is None
+    assert reconciled.aps[new_mac].ip == "172.20.11.12"
+    assert tracker.is_conflicted(old_mac)
+    assert tracker.is_conflicted(new_mac)
+    assert tracker.conflicts["172.20.11.12"].owner_mac == new_mac
+
+
+def test_ap_ip_repeated_http_conflict_does_not_flip_owner() -> None:
+    now = datetime(2026, 10, 21, 10, 0, tzinfo=UTC)
+    mac_a = "44:95:3B:B8:DD:10"
+    mac_b = "44:95:3B:B8:E3:50"
+    data = models.RltechData(
+        aps={
+            mac_a: models.RltechAp(
+                mac=mac_a, sn="RLGM3BB8DD10", ip="172.20.11.12", online=True
+            ),
+            mac_b: models.RltechAp(
+                mac=mac_b, sn="RLGM3BB8E350", ip="172.20.11.12", online=True
+            ),
+        }
+    )
+    tracker = ap_ip_ownership.ApIpOwnershipTracker()
+    tracker.observe_http_inventory(data.aps, now=now)
+    first_owner = tracker.conflicts["172.20.11.12"].owner_mac
+
+    tracker.observe_http_inventory(data.aps, now=now + timedelta(minutes=1))
+
+    assert tracker.conflicts["172.20.11.12"].owner_mac == first_owner
+
+
+def test_ap_ip_conflict_resolves_when_claimant_goes_offline() -> None:
+    now = datetime(2026, 10, 21, 10, 0, tzinfo=UTC)
+    mac_a = "44:95:3B:B8:DD:10"
+    mac_b = "44:95:3B:B8:E3:50"
+    data = models.RltechData(
+        aps={
+            mac_a: models.RltechAp(
+                mac=mac_a, sn="RLGM3BB8DD10", ip="172.20.11.12", online=True
+            ),
+            mac_b: models.RltechAp(
+                mac=mac_b, sn="RLGM3BB8E350", ip="172.20.11.12", online=True
+            ),
+        }
+    )
+    tracker = ap_ip_ownership.ApIpOwnershipTracker()
+    tracker.observe_http_inventory(data.aps, now=now)
+    tracker.observe_mqtt_status(
+        data.aps,
+        mac=mac_a,
+        online=False,
+        reported_ip=None,
+        now=now + timedelta(seconds=10),
+    )
+    updated = models.RltechData(
+        aps={mac_a: replace(data.aps[mac_a], online=False), mac_b: data.aps[mac_b]}
+    )
+    reconciled = tracker.apply(updated)
+
+    assert reconciled.aps[mac_a].ip is None
+    assert reconciled.aps[mac_b].ip == "172.20.11.12"
+    assert not tracker.conflicts
+
+
+def test_ap_ip_stale_offline_http_row_cannot_reclaim_address() -> None:
+    now = datetime(2026, 10, 21, 10, 0, tzinfo=UTC)
+    old_mac = "44:95:3B:B8:DD:10"
+    new_mac = "44:95:3B:B8:E3:50"
+    tracker = ap_ip_ownership.ApIpOwnershipTracker()
+    initial = models.RltechData(
+        aps={
+            old_mac: models.RltechAp(
+                mac=old_mac, ip="172.20.11.12", online=True
+            ),
+            new_mac: models.RltechAp(mac=new_mac, online=False),
+        }
+    )
+    tracker.observe_http_inventory(initial.aps, now=now)
+    tracker.observe_mqtt_status(
+        initial.aps,
+        mac=old_mac,
+        online=False,
+        reported_ip=None,
+        now=now + timedelta(seconds=5),
+    )
+    tracker.observe_mqtt_status(
+        initial.aps,
+        mac=new_mac,
+        online=True,
+        reported_ip="172.20.11.12",
+        now=now + timedelta(seconds=10),
+    )
+
+    stale_http = models.RltechData(
+        aps={
+            old_mac: models.RltechAp(
+                mac=old_mac, ip="172.20.11.12", online=False
+            ),
+            new_mac: models.RltechAp(
+                mac=new_mac, ip="172.20.11.12", online=True
+            ),
+        }
+    )
+    tracker.observe_http_inventory(stale_http.aps, now=now + timedelta(minutes=1))
+    reconciled = tracker.apply(stale_http)
+
+    assert reconciled.aps[old_mac].ip is None
+    assert reconciled.aps[new_mac].ip == "172.20.11.12"
+    assert not tracker.conflicts
+
+
+def test_ap_ip_fresh_mqtt_fields_outrank_http_snapshot() -> None:
+    now = datetime(2026, 10, 21, 10, 0, tzinfo=UTC)
+    mac = "44:95:3B:B8:E3:50"
+    tracker = ap_ip_ownership.ApIpOwnershipTracker()
+    baseline = models.RltechData(
+        aps={mac: models.RltechAp(mac=mac, ip="172.20.11.12", online=True)}
+    )
+    tracker.observe_http_inventory(baseline.aps, now=now)
+    tracker.observe_mqtt_status(
+        baseline.aps,
+        mac=mac,
+        online=True,
+        reported_ip="172.20.11.13",
+        now=now + timedelta(seconds=5),
+    )
+
+    tracker.observe_http_inventory(
+        baseline.aps,
+        now=now + timedelta(seconds=10),
+        protected_fields={mac: {"ip", "online"}},
+    )
+    reconciled = tracker.apply(baseline)
+
+    assert reconciled.aps[mac].ip == "172.20.11.13"
+
+
+def test_ap_ip_two_offline_rows_do_not_keep_ambiguous_address() -> None:
+    now = datetime(2026, 10, 21, 10, 0, tzinfo=UTC)
+    data = models.RltechData(
+        aps={
+            "a": models.RltechAp(mac="a", ip="172.20.11.12", online=False),
+            "b": models.RltechAp(mac="b", ip="172.20.11.12", online=False),
+        }
+    )
+    tracker = ap_ip_ownership.ApIpOwnershipTracker()
+    tracker.observe_http_inventory(data.aps, now=now)
+    reconciled = tracker.apply(data)
+
+    assert reconciled.aps["a"].ip is None
+    assert reconciled.aps["b"].ip is None
+    assert not tracker.conflicts
 
 
 def test_ap_device_registry_updates_preserve_parent_without_known_source() -> None:

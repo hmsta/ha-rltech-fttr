@@ -79,8 +79,10 @@ class RltechApRebootButton(RltechEntity, ButtonEntity):
 
     @property
     def available(self) -> bool:
-        ap = self._ap
-        return super().available and ap is not None and bool(ap.ip)
+        return (
+            super().available
+            and self.coordinator.ap_direct_action_unavailable_reason(self._mac) is None
+        )
 
     @property
     def device_info(self):
@@ -107,11 +109,17 @@ class RltechApRebootButton(RltechEntity, ButtonEntity):
             < REBOOT_COOLDOWN_SECONDS
         ):
             raise HomeAssistantError("AP reboot was already requested recently")
-        ap = self._ap
-        if ap is None or not ap.ip:
-            raise HomeAssistantError("AP has no IP address for reboot")
         session = async_get_clientsession(self.coordinator.hass)
         async with self._reboot_lock:
+            if (
+                reason := self.coordinator.ap_direct_action_unavailable_reason(
+                    self._mac
+                )
+            ) is not None:
+                raise HomeAssistantError(reason)
+            ap = self._ap
+            if ap is None:
+                raise HomeAssistantError("AP is not available")
             try:
                 await self.coordinator.client.reboot_ap(session, ap)
             except RltechError as err:
