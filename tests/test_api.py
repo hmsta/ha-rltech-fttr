@@ -740,6 +740,29 @@ def test_mqtt_ap_lifecycle_updates_known_ap_only() -> None:
     assert mqtt.merge_ap_status_update(data, unknown) is data
 
 
+def test_mqtt_ap_online_parses_reported_metadata() -> None:
+    cmd, update = mqtt.parse_mqtt_payload(
+        json.dumps(
+            {
+                "DevSN": "RL2024090300111",
+                "IPAddress": "172.20.11.22",
+                "MAC": "44953BB8E070",
+                "Model": "RH802GW-AX3",
+                "PONSN": "RLGM3BB8E070",
+                "Version": "V0.0.49",
+            }
+        ),
+        mqtt.TOPIC_AP_ONLINE,
+    )
+
+    assert cmd == "APOnline"
+    assert isinstance(update, mqtt.MqttApStatusUpdate)
+    assert update.mac == "44:95:3B:B8:E0:70"
+    assert update.sn == "RLGM3BB8E070"
+    assert update.version == "V0.0.49"
+    assert update.ip == "172.20.11.22"
+
+
 def test_mqtt_ap_lifecycle_can_match_by_sn() -> None:
     mac = "44:95:3B:B8:DC:D0"
     data = models.RltechData(
@@ -752,16 +775,58 @@ def test_mqtt_ap_lifecycle_can_match_by_sn() -> None:
         }
     )
     cmd, update = mqtt.parse_mqtt_payload(
-        json.dumps({"Data": {"PONSN": "RLGM-3BB8DCD0"}}), mqtt.TOPIC_AP_ONLINE
+        json.dumps(
+            {
+                "Data": {
+                    "PONSN": "RLGM-3BB8DCD0",
+                    "Version": "V0.0.49",
+                    "IPAddress": "172.20.11.15",
+                }
+            }
+        ),
+        mqtt.TOPIC_AP_ONLINE,
     )
 
     assert cmd == "APOnline"
     assert isinstance(update, mqtt.MqttApStatusUpdate)
     assert update.sn == "RLGM3BB8DCD0"
     assert update.online is True
+    assert update.version == "V0.0.49"
+    assert update.ip == "172.20.11.15"
 
     merged = mqtt.merge_ap_status_update(data, update)
     assert merged.aps[mac].online is True
+    assert merged.aps[mac].version == "V0.0.49"
+    assert merged.aps[mac].ip == "172.20.11.15"
+
+
+def test_mqtt_ap_offline_does_not_replace_inventory_metadata() -> None:
+    mac = "44:95:3B:B8:DC:D0"
+    data = models.RltechData(
+        aps={
+            mac: models.RltechAp(
+                mac=mac,
+                sn="RLGM3BB8DCD0",
+                version="V0.0.49",
+                ip="172.20.11.15",
+                online=True,
+            )
+        }
+    )
+
+    merged = mqtt.merge_ap_status_update(
+        data,
+        mqtt.MqttApStatusUpdate(
+            online=False,
+            mac=mac,
+            version="stale",
+            ip="192.0.2.1",
+        ),
+    )
+
+    assert merged.aps[mac].online is False
+    assert merged.aps[mac].version == "V0.0.49"
+    assert merged.aps[mac].ip == "172.20.11.15"
 
 
 def test_mqtt_ap_offline_clears_mqtt_health_but_keeps_port80_data() -> None:
@@ -1027,6 +1092,8 @@ def test_mqtt_live_overlay_preserves_recent_fields_updated_before_poll() -> None
                 sn="RLGM3BB8DCD0",
                 online=False,
                 assoc_count=7,
+                version="V0.0.49",
+                ip="172.20.11.15",
             )
         }
     )
@@ -1037,6 +1104,8 @@ def test_mqtt_live_overlay_preserves_recent_fields_updated_before_poll() -> None
                 sn="RLGM3BB8DCD0",
                 online=True,
                 assoc_count=2,
+                version="V0.0.41",
+                ip="172.20.11.99",
             )
         }
     )
@@ -1045,11 +1114,13 @@ def test_mqtt_live_overlay_preserves_recent_fields_updated_before_poll() -> None
         current,
         fresh,
         current,
-        live_ap_fields={mac: {"online", "assoc_count"}},
+        live_ap_fields={mac: {"online", "assoc_count", "version", "ip"}},
     )
 
     assert merged.aps[mac].online is False
     assert merged.aps[mac].assoc_count == 7
+    assert merged.aps[mac].version == "V0.0.49"
+    assert merged.aps[mac].ip == "172.20.11.15"
 
 
 def test_mqtt_live_overlay_does_not_preserve_unrelated_ap_field() -> None:

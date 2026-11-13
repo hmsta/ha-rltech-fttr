@@ -88,6 +88,8 @@ class MqttApStatusUpdate:
     online: bool
     mac: str | None = None
     sn: str | None = None
+    version: str | None = None
+    ip: str | None = None
 
 
 @dataclass(slots=True)
@@ -244,7 +246,13 @@ def parse_ap_status(payload: str, *, online: bool) -> MqttApStatusUpdate | None:
     mac, sn = _extract_ap_identity(message)
     if mac is None and sn is None:
         return None
-    return MqttApStatusUpdate(online=online, mac=mac, sn=sn)
+    return MqttApStatusUpdate(
+        online=online,
+        mac=mac,
+        sn=sn,
+        version=_extract_ap_text(message, ("Version", "version")),
+        ip=_extract_ap_text(message, ("IPAddress", "IpAddress", "IP", "ip")),
+    )
 
 
 def merge_station_updates(
@@ -397,8 +405,14 @@ def merge_ap_status_update(
         return data
 
     ap = data.aps[mac]
+    updates: dict[str, Any] = {"online": update.online}
+    if update.online:
+        if update.version is not None:
+            updates["version"] = update.version
+        if update.ip is not None:
+            updates["ip"] = update.ip
     aps = dict(data.aps)
-    aps[mac] = replace(ap, online=update.online)
+    aps[mac] = replace(ap, **updates)
     merged = replace(data, aps=aps)
     if update.online is False:
         merged = clear_offline_ap_mqtt_health(merged)
@@ -482,6 +496,10 @@ def _preserve_live_ap_fields(
             online_changed_during_poll or "online" in authoritative_fields
         ):
             updates["online"] = current_ap.online
+        if current_ap.version is not None and "version" in authoritative_fields:
+            updates["version"] = current_ap.version
+        if current_ap.ip is not None and "ip" in authoritative_fields:
+            updates["ip"] = current_ap.ip
         if updates:
             aps[mac] = replace(aps[mac], **updates)
     return aps
@@ -936,6 +954,21 @@ def _extract_ap_identity(value: Any) -> tuple[str | None, str | None]:
         sn = _normalize_sn(sn_match.group(0)) if sn_match else None
         return mac, sn
     return None, None
+
+
+def _extract_ap_text(value: Any, keys: tuple[str, ...]) -> str | None:
+    """Return the first non-empty AP lifecycle field, including nested payloads."""
+    if not isinstance(value, dict):
+        return None
+    for key in keys:
+        text = _none_if_empty(value.get(key))
+        if text is not None:
+            return text
+    for nested_key in ("Data", "data", "Payload", "payload", "Body", "body"):
+        text = _extract_ap_text(value.get(nested_key), keys)
+        if text is not None:
+            return text
+    return None
 
 
 def _first_normalized(

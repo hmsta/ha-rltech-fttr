@@ -249,6 +249,10 @@ class RltechCoordinator(DataUpdateCoordinator[RltechData]):
             mac = self._mqtt_status_ap_mac(update, data)
             if mac is not None:
                 self._record_mqtt_ap_field(mac, "online", now)
+                if update.online and update.version is not None:
+                    self._record_mqtt_ap_field(mac, "version", now)
+                if update.online and update.ip is not None:
+                    self._record_mqtt_ap_field(mac, "ip", now)
         else:
             return
         if data is self._last_data:
