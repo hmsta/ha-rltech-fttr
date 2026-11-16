@@ -449,6 +449,7 @@ class RltechFttrApTableCard extends HTMLElement {
         this._refreshColumnPicker();
         this._renderHeaders();
         this._refreshPageSize();
+        this._refreshMobileSortControls();
         return this._resolvedEntryId;
       }
       this._error = entries.length
