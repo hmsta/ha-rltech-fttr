@@ -901,7 +901,7 @@ class RltechFttrApTableCard extends HTMLElement {
 
   _mobileRow(row, index, defs, columns) {
     const main = row.alias || row.ip || row.mac || "Access point";
-    const fields = columns.filter((key) => key !== "details").slice(0, 6);
+    const fields = columns.filter((key) => key !== "details");
     return `
       <div class="mobile-row">
         <div class="mobile-main">

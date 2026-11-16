@@ -924,7 +924,7 @@ class RltechFttrStationTableCard extends HTMLElement {
 
   _mobileRow(row, index, defs, columns) {
     const main = row.hostname || row.ip || row.mac || "Station";
-    const fields = columns.filter((key) => key !== "details").slice(0, 6);
+    const fields = columns.filter((key) => key !== "details");
     return `
       <div class="mobile-row">
         <div class="mobile-main">
