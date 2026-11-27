@@ -3,7 +3,8 @@ class RltechFttrApTableCard extends HTMLElement {
     super();
     this.attachShadow({ mode: "open" });
     this._rows = [];
-    this._search = "";
+    this._desktopSearch = "";
+    this._mobileSearch = "";
     this._filters = { state: "", profile: "", model: "", uplink: "" };
     this._sortKey = "online";
     this._sortDir = 1;
@@ -54,7 +55,9 @@ class RltechFttrApTableCard extends HTMLElement {
     this._mobileColumns = this._validColumns(this._config.mobile_columns, this._defaultMobileColumns());
     this._setupMediaQuery();
     this._loadPreferences(true);
+    this._loadMobileSearch();
     this._renderShell();
+    this.shadowRoot.getElementById("search").value = this._search;
     this._refreshTable();
   }
 
@@ -213,6 +216,7 @@ class RltechFttrApTableCard extends HTMLElement {
       this._isMobile = event.matches;
       this._page = 0;
       if (this._shellRendered) {
+        this.shadowRoot.getElementById("search").value = this._search;
         this._refreshColumnPicker();
         this._renderHeaders();
         this._refreshPageSize();
@@ -224,6 +228,48 @@ class RltechFttrApTableCard extends HTMLElement {
       this._mediaQuery.addEventListener("change", listener);
     } else {
       this._mediaQuery.addListener(listener);
+    }
+  }
+
+  get _search() {
+    return this._isMobile ? this._mobileSearch : this._desktopSearch;
+  }
+
+  _mobileSearchStorageKey() {
+    const key = this._config.storage_key || this._config.entry_id || "auto";
+    return `rltech_fttr.ap_table.${key}.mobile_search`;
+  }
+
+  _loadMobileSearch() {
+    this._mobileSearch = "";
+    if (!this._config.remember_preferences) {
+      return;
+    }
+    try {
+      this._mobileSearch = window.localStorage.getItem(this._mobileSearchStorageKey()) ?? "";
+    } catch (_) {
+      // Browser storage can be unavailable in restricted web views.
+    }
+  }
+
+  _setSearch(value) {
+    if (!this._isMobile) {
+      this._desktopSearch = value;
+      return;
+    }
+    this._mobileSearch = value;
+    if (!this._config.remember_preferences) {
+      return;
+    }
+    try {
+      const key = this._mobileSearchStorageKey();
+      if (value) {
+        window.localStorage.setItem(key, value);
+      } else {
+        window.localStorage.removeItem(key);
+      }
+    } catch (_) {
+      // Keep the search usable even if storage is unavailable.
     }
   }
 
@@ -318,6 +364,7 @@ class RltechFttrApTableCard extends HTMLElement {
   _resetPreferences() {
     try {
       window.localStorage.removeItem(this._storageKey());
+      window.localStorage.removeItem(this._mobileSearchStorageKey());
       for (const key of this._legacyStorageKeys()) {
         window.localStorage.removeItem(key);
       }
@@ -331,7 +378,8 @@ class RltechFttrApTableCard extends HTMLElement {
     this._sortKey = this._config.default_sort_key || "online";
     this._sortDir = this._config.default_sort_dir === -1 ? -1 : 1;
     this._filters = { state: "", profile: "", model: "", uplink: "" };
-    this._search = "";
+    this._desktopSearch = "";
+    this._mobileSearch = "";
     this._page = 0;
     this.shadowRoot.getElementById("search").value = "";
     this._closeOptions();
@@ -740,7 +788,7 @@ class RltechFttrApTableCard extends HTMLElement {
     `;
 
     this.shadowRoot.getElementById("search").addEventListener("input", (event) => {
-      this._search = event.target.value;
+      this._setSearch(event.target.value);
       this._page = 0;
       this._debouncedFetch();
     });
@@ -997,7 +1045,7 @@ class RltechFttrApTableCard extends HTMLElement {
 
   _clearFilters() {
     this._filters = { state: "", profile: "", model: "", uplink: "" };
-    this._search = "";
+    this._setSearch("");
     this._page = 0;
     this.shadowRoot.getElementById("search").value = "";
     this._refreshFilterOptions();

@@ -237,9 +237,8 @@ expire after the configured station retention window.
 
 The visible columns, mobile columns, page size, sort order, and filters can be
 changed in the card's table options menu. By default those UI preferences are
-remembered in the current browser's local storage. Search text is intentionally
-not remembered. On phone-sized screens the card switches from a wide table to a
-compact row layout using `mobile_columns`.
+remembered in the current browser's local storage. On phone-sized screens the
+card switches from a wide table to a compact row layout using `mobile_columns`.
 
 ## AP table card
 
@@ -297,6 +296,10 @@ card's table options menu.
 
 Use `storage_key` if you place multiple cards for the same config entry on
 different dashboards and want separate remembered browser layouts.
+
+Both cards remember the search text in the mobile layout when
+`remember_preferences` is enabled. Desktop searches last until the card is
+reopened. Use Clear in the mobile layout to remove the saved search.
 
 The AP table also accepts `default_sort_key` and `default_sort_dir`. By default
 APs are sorted by `online` ascending, so offline APs appear first.
